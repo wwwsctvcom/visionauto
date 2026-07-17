@@ -1,0 +1,43 @@
+[project]
+name = "visionauto"
+version = "0.1.0"
+description = "uiautomator2-based device control with AI vision selectors"
+readme = "README.md"
+requires-python = ">=3.12"
+license = "MIT"
+authors = [
+    { name = "visionauto" },
+]
+keywords = ["uiautomator2", "android", "automation", "vision", "vlm", "testing", "ocr"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Topic :: Software Development :: Testing",
+    "Intended Audience :: Developers",
+]
+dependencies = [
+    "uiautomator2>=3.0.0",
+    "openai>=1.0.0",
+    "airtest>=1.3.0",
+    "opencv-python>=4.8.0",
+    "numpy>=1.24.0",
+    "pillow>=10.0.0",
+    "json-repair>=0.5.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/wwwsctvcom/visionauto"
+Repository = "https://github.com/wwwsctvcom/visionauto"
+Issues = "https://github.com/wwwsctvcom/visionauto/issues"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["visionauto"]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0", "build", "twine"]
