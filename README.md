@@ -1,5 +1,10 @@
 # visionauto
 
+[![PyPI version](https://img.shields.io/pypi/v/visionauto.svg)](https://pypi.org/project/visionauto/)
+[![Python](https://img.shields.io/pypi/pyversions/visionauto.svg)](https://pypi.org/project/visionauto/)
+[![License](https://img.shields.io/pypi/l/visionauto.svg)](https://github.com/wwwsctvcom/visionauto/blob/main/LICENSE)
+[![Status](https://img.shields.io/pypi/status/visionauto.svg)](https://pypi.org/project/visionauto/)
+
 uiautomator2 设备控制 + AI 视觉选择器。用 u2 做"手"（截图、点击坐标、手势、弹窗 watcher），用 VLM 做"眼"（定位元素）。用法对齐 u2：`d(text="你好").click()`，但定位走视觉，能识别自绘/Canvas/图标按钮等无障碍树拿不到的控件。
 
 ## 安装
@@ -238,25 +243,3 @@ VISIONAUTO_TEST_IMAGE=./x.png \
 VISIONAUTO_TEST_MODELS=qwen3.7-max-2026-06-08,qwen3.7-plus \
 pytest -v -s tests/test_provider_vision.py
 ```
-
-## 发布到 PyPI
-
-发布前先补全 `pyproject.toml` 里的 `authors` 和 `project.urls`（标了 TODO），并确认 `visionauto` 名称在 PyPI 未被占用。
-
-```bash
-pip install -e ".[dev]"          # 含 build / twine
-python -m build                  # 生成 dist/*.whl 和 dist/*.tar.gz
-twine check dist/*               # 校验元数据
-twine upload --repository testpypi dist/*   # 先传 TestPyPI 验证
-pip install -i https://test.pypi.org/simple/ visionauto   # 试装
-
-# 正式发布
-twine upload dist/*
-# 之后任何人： pip install visionauto
-```
-
-要点：
-
-- 包代码在 `visionauto/`，`tests/`、`examples/`、`out/` 不会被打进 wheel（hatchling 只打包 `packages = ["visionauto"]`）。
-- 每次发布记得递增 `pyproject.toml` 的 `version`，PyPI 不允许覆盖已上传的版本。
-- 重依赖（`airtest`/`opencv-python`/`uiautomator2`）体积较大；若想瘦身可把 image 兜底依赖挪到 `[project.optional-dependencies]` 的 extra（如 `pip install visionauto[image]`），需同步改 `matching/opencv.py` 的 import 容错（已有 `try/except ImportError`）。

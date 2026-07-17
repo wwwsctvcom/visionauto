@@ -13,3 +13,7 @@ wheels/
 out/
 tests/_sample.png
 .pytest_cache/
+
+# Publish secrets (never commit)
+.pypirc
+.pypirc.*
