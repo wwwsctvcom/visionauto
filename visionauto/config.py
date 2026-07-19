@@ -36,6 +36,15 @@ class Config:
     # resolution, so the whole run can be replayed from debug_dir.
     debug: bool = False
     debug_dir: str = "out/trace"
+    # P0 robustness:
+    # implicit_wait: every exists()/action auto-polls up to this many seconds
+    #   before reporting not-found (0 = off, fail fast like before).
+    implicit_wait: float = 0.0
+    # resolve_retries: when a VLM resolve returns empty/raises, retry with a
+    #   fresh screenshot this many times before concluding not-found.
+    resolve_retries: int = 2
+    # fail_dir: where assert_* helpers save screenshots on failure.
+    fail_dir: str = "out/fail"
 
     @classmethod
     def from_env(cls, **overrides) -> "Config":
@@ -49,13 +58,14 @@ class Config:
             "base_url": "VISIONAUTO_BASE_URL",
             "opencv_method": "VISIONAUTO_OPENCV_METHOD",
             "debug_dir": "VISIONAUTO_DEBUG_DIR",
+            "fail_dir": "VISIONAUTO_FAIL_DIR",
         }
         for key, env in str_map.items():
             val = os.environ.get(env)
             if val is not None:
                 kwargs[key] = val
 
-        for key in ("opencv_threshold", "cache_ttl", "default_timeout", "temperature"):
+        for key in ("opencv_threshold", "cache_ttl", "default_timeout", "temperature", "implicit_wait"):
             env = f"VISIONAUTO_{key.upper()}"
             val = os.environ.get(env)
             if val is not None:
@@ -63,6 +73,13 @@ class Config:
                     kwargs[key] = float(val)
                 except ValueError:
                     raise ValueError(f"{env}={val!r} is not a valid float for {key}")
+
+        retries_env = os.environ.get("VISIONAUTO_RESOLVE_RETRIES")
+        if retries_env is not None:
+            try:
+                kwargs["resolve_retries"] = int(retries_env)
+            except ValueError:
+                raise ValueError(f"VISIONAUTO_RESOLVE_RETRIES={retries_env!r} is not a valid int")
 
         kwargs["opencv_rgb"] = _env_bool("VISIONAUTO_OPENCV_RGB", True)
         kwargs["normalize_text"] = _env_bool("VISIONAUTO_NORMALIZE_TEXT", True)

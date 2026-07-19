@@ -46,6 +46,9 @@ d(text="发送").click()
 | `cache_ttl` | `VISIONAUTO_CACHE_TTL` | `2.0` | 截图复用秒数 |
 | `default_timeout` | `VISIONAUTO_DEFAULT_TIMEOUT` | `10.0` | `wait()` 默认超时 |
 | `normalize_text` | `VISIONAUTO_NORMALIZE_TEXT` | `True` | 文字匹配前折叠空白 |
+| `implicit_wait` | `VISIONAUTO_IMPLICIT_WAIT` | `0.0` | 隐式等待秒数（exists/动作自动轮询，0=关） |
+| `resolve_retries` | `VISIONAUTO_RESOLVE_RETRIES` | `2` | AI 空结果/异常时换帧重试次数 |
+| `fail_dir` | `VISIONAUTO_FAIL_DIR` | `out/fail` | 断言失败截图目录 |
 | `debug` | `VISIONAUTO_DEBUG` | `False` | 调试追踪开关 |
 | `debug_dir` | `VISIONAUTO_DEBUG_DIR` | `out/trace` | 追踪输出目录 |
 
@@ -95,6 +98,7 @@ d(text="发送").click()
 | `input(text, clear=False)` | 点击聚焦后输入文字 |
 | `drag_to(**query, duration=0.5)` | 拖到另一个元素（同张截图取两点坐标） |
 | `swipe(direction, scale=0.9, duration=0.5)` | 从该元素出发按方向滑，u2 `swipe_ext` 风格 |
+| `scroll_to(direction="up", max_swipes=10)` | 整屏滚动直到该元素出现，返回 self 可链式 `.click()` |
 
 ```python
 d(text="A").drag_to(text="B")              # 注意：目标是 kwargs，不是 d(...)
@@ -118,6 +122,33 @@ finally:
 ```
 
 标准系统弹窗（有 accessibility text）用 watcher 最稳；自绘/无障碍缺失的弹窗再用 `d(description="...").click()` 视觉处理。完整示例见 `examples/popup_watcher.py`。
+
+## 稳定性与断言
+
+**隐式等待**——开了之后 `exists()` 和所有动作自动轮询到超时，不必每步手动 `wait()`：
+
+```python
+d.implicitly_wait(5)              # 或 config(implicit_wait=5)
+d(text="提交").click()            # 最多等 5s，出现才点
+```
+
+**AI 解析重试**——VLM 这一帧空/异常时自动换帧重试（`resolve_retries` 默认 2），对抗 AI 抽风导致的假阴性，用户无感。
+
+**滚动定位**——长列表里找目标：
+
+```python
+d(text="关于手机").scroll_to().click()              # 向上滚直到出现再点
+d(text="第100条").scroll_to(direction="up", max_swipes=20).click()
+```
+
+**断言助手**（失败自动存截图到 `out/fail/`，CI 排查利器）：
+
+```python
+d.assert_exists(text="首页")
+d.assert_gone(text="加载中")
+d.assert_text("设置", text="设置")          # 元素文字 == 预期
+d.assert_count(3, textContains="结果")      # 匹配数 == 3
+```
 
 ## 直接使用 uiautomator2 API
 

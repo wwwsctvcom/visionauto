@@ -36,6 +36,7 @@ class Selector:
         return TextLocator(self._query, normalize_text=cfg.normalize_text)
 
     def _resolve(self, force_shot: bool = False) -> list[Located]:
+        cfg = self._device._config
         shot, (w, h) = self._device._screenshot(force=force_shot)
         key = (hash(shot), tuple(sorted(self._query.items())))
         cached = self._device._cache.get(key)
@@ -45,8 +46,25 @@ class Selector:
                 picked_index=self._index,
             )
             return cached
-        locs = self._locator().resolve(shot, w, h, self._device._provider)
-        self._device._cache.set(key, locs)
+
+        locator = self._locator()
+        locs: list[Located] = []
+        # AI resolve retry: re-screenshot and re-ask on empty/exception, so a
+        # single flaky frame doesn't cause a false not-found.
+        for attempt in range(cfg.resolve_retries + 1):
+            try:
+                locs = locator.resolve(shot, w, h, self._device._provider)
+            except Exception:
+                locs = []
+            if locs:
+                break
+            if attempt < cfg.resolve_retries:
+                shot, (w, h) = self._device._screenshot(force=True)
+
+        # cache under the frame that produced the result
+        self._device._cache.set(
+            (hash(shot), tuple(sorted(self._query.items()))), locs
+        )
         self._device._debug.record_resolve(
             self._query, self._kind(), shot, locs, cached=False,
             picked_index=self._index,
@@ -68,6 +86,21 @@ class Selector:
             return None
         return locs[self._index]
 
+    def _pick_wait(self) -> Located | None:
+        """_pick honoring implicit_wait: poll fresh frames until found or timeout."""
+        loc = self._pick()
+        if loc is not None:
+            return loc
+        timeout = self._device._config.implicit_wait
+        if timeout and timeout > 0:
+            deadline = time.monotonic() + timeout
+            while time.monotonic() < deadline:
+                loc = self._pick(force_shot=True)
+                if loc is not None:
+                    return loc
+                time.sleep(0.5)
+        return loc
+
     def all(self) -> list[Located]:
         """Return every match for this query."""
         return list(self._resolve())
@@ -75,7 +108,7 @@ class Selector:
     # -- queries ------------------------------------------------------------
 
     def exists(self) -> bool:
-        return self._pick() is not None
+        return self._pick_wait() is not None
 
     def wait(self, timeout: float | None = None, interval: float = 0.5) -> bool:
         """Poll with fresh screenshots until the element appears or timeout."""
@@ -97,7 +130,7 @@ class Selector:
     # -- actions ------------------------------------------------------------
 
     def _require(self) -> Located:
-        loc = self._pick()
+        loc = self._pick_wait()
         if loc is None:
             raise ElementNotFound(self._query, self._index)
         return loc
@@ -190,6 +223,28 @@ class Selector:
             self.click()
             return True
         return False
+
+    def scroll_to(
+        self,
+        direction: str = "up",
+        max_swipes: int = 10,
+        scale: float = 0.5,
+        interval: float = 0.5,
+    ) -> "Selector":
+        """Swipe the whole screen until this element appears, then return self.
+
+        direction: "up" (reveal items below) | "down" | "left" | "right".
+        Chains naturally: d(text="关于手机").scroll_to().click().
+        Raises ElementNotFound if not found within max_swipes.
+        """
+        if self._pick(force_shot=True) is not None:
+            return self
+        for _ in range(max_swipes):
+            self._device._u2.swipe_ext(direction, scale=scale)
+            time.sleep(interval)
+            if self._pick(force_shot=True) is not None:
+                return self
+        raise ElementNotFound(self._query, self._index)
 
     def __repr__(self) -> str:
         return f"<Selector {self._query} index={self._index}>"
