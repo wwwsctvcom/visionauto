@@ -1,4 +1,10 @@
-"""Configuration for visionauto: provider credentials, model, thresholds, timing."""
+"""Framework behavior configuration for visionauto.
+
+This holds ONLY how the framework behaves (waits, retries, caching, matching,
+debug) — nothing about how to connect to a VLM. Provider transport settings
+(api_key / model / base_url / extra_headers / temperature) live in
+``visionauto.providers.config.ProviderConfig``.
+"""
 from __future__ import annotations
 
 import os
@@ -14,11 +20,6 @@ def _env_bool(name: str, default: bool) -> bool:
 
 @dataclass
 class Config:
-    provider: str = "glm"
-    api_key: str | None = None
-    model: str | None = None
-    base_url: str | None = None
-
     # image strategy: OpenCV confidence threshold; below this, fall back to VLM
     opencv_threshold: float = 0.8
     # airtest-backed matching: re-verify with BGR channels, and matcher selection.
@@ -28,7 +29,6 @@ class Config:
     cache_ttl: float = 2.0
     # default wait() timeout
     default_timeout: float = 10.0
-    temperature: float = 0.0
     # collapse whitespace in returned text before text/textContains/textStartsWith
     # matching, so "设置 中心" still matches "设置中心" (AI sometimes splits labels).
     normalize_text: bool = True
@@ -36,9 +36,8 @@ class Config:
     # resolution, so the whole run can be replayed from debug_dir.
     debug: bool = False
     debug_dir: str = "out/trace"
-    # P0 robustness:
     # implicit_wait: every exists()/action auto-polls up to this many seconds
-    #   before reporting not-found (0 = off, fail fast like before).
+    #   before reporting not-found (0 = off, fail fast).
     implicit_wait: float = 0.0
     # resolve_retries: when a VLM resolve returns empty/raises, retry with a
     #   fresh screenshot this many times before concluding not-found.
@@ -52,10 +51,6 @@ class Config:
         kwargs: dict = {}
 
         str_map = {
-            "provider": "VISIONAUTO_PROVIDER",
-            "api_key": "VISIONAUTO_API_KEY",
-            "model": "VISIONAUTO_MODEL",
-            "base_url": "VISIONAUTO_BASE_URL",
             "opencv_method": "VISIONAUTO_OPENCV_METHOD",
             "debug_dir": "VISIONAUTO_DEBUG_DIR",
             "fail_dir": "VISIONAUTO_FAIL_DIR",
@@ -65,7 +60,7 @@ class Config:
             if val is not None:
                 kwargs[key] = val
 
-        for key in ("opencv_threshold", "cache_ttl", "default_timeout", "temperature", "implicit_wait"):
+        for key in ("opencv_threshold", "cache_ttl", "default_timeout", "implicit_wait"):
             env = f"VISIONAUTO_{key.upper()}"
             val = os.environ.get(env)
             if val is not None:

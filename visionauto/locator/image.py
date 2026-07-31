@@ -4,7 +4,7 @@ from __future__ import annotations
 from ..coords import normalize_raw_boxes, to_norm_from_abs
 from ..located import Located
 from ..matching import match as opencv_match
-from ..prompts import IMAGE_PROMPT
+from ..providers.prompts import IMAGE_PROMPT
 from ..providers.base import VisionProvider
 from ..utils import parse_json
 

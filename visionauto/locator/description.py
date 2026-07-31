@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from ..coords import normalize_raw_boxes
 from ..located import Located
-from ..prompts import DESCRIPTION_PROMPT_TEMPLATE
+from ..providers.prompts import DESCRIPTION_PROMPT_TEMPLATE
 from ..providers.base import VisionProvider
 from ..utils import parse_json
 

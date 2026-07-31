@@ -25,13 +25,12 @@ import subprocess
 import pytest
 from PIL import Image, ImageDraw, ImageFont
 
-from visionauto.config import Config
-from visionauto.prompts import (
+from visionauto.providers import get_provider_from_env
+from visionauto.providers.prompts import (
     DESCRIPTION_PROMPT_TEMPLATE,
     IMAGE_PROMPT,
     TEXT_PROMPT,
 )
-from visionauto.providers import get_provider
 from visionauto.utils import parse_json
 
 OUT_DIR = os.path.join(os.path.dirname(__file__), "..", "out")
@@ -68,10 +67,9 @@ def _adb_screenshot() -> bytes:
 
 
 def _provider():
-    cfg = Config.from_env()
-    if not cfg.api_key:
+    if not os.environ.get("VISIONAUTO_API_KEY"):
         pytest.skip("set VISIONAUTO_API_KEY")
-    return get_provider(cfg)
+    return get_provider_from_env()
 
 
 def _draw(screenshot_png: bytes, nodes: list[dict], out_name: str) -> None:

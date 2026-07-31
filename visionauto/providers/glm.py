@@ -3,10 +3,13 @@ from __future__ import annotations
 
 from .base import OpenAICompatibleProvider
 
+GLM_5V_TURBO = "GLM-5V-Turbo"
+GLM_4_5V = "glm-4.5v"
+
 
 class GLMProvider(OpenAICompatibleProvider):
     DEFAULT_BASE_URL = "https://open.bigmodel.cn/api/paas/v4/"
-    DEFAULT_MODEL = "GLM-5V-Turbo"
+    DEFAULT_MODEL = GLM_5V_TURBO
 
     def supports_temperature(self) -> bool:
         # GLM-Z1 / thinking / reasoner series do not accept temperature.

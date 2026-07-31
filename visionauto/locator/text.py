@@ -5,7 +5,7 @@ import re
 
 from ..coords import normalize_raw_boxes
 from ..located import Located
-from ..prompts import TEXT_PROMPT
+from ..providers.prompts import TEXT_PROMPT
 from ..providers.base import VisionProvider
 from ..utils import parse_json
 

@@ -16,10 +16,18 @@ adb devices                       # 确认有一台设备在线
 
 ## 快速开始
 
-```python
-import visionauto as va
+一个入口 `VisionDevice(sn=, provider=, config=)`，无需单独 connect：
 
-d = va.connect(api_key="sk-xxx", provider="qwen")   # 或纯走环境变量
+```python
+from visionauto import VisionDevice, Config, Models
+from visionauto.providers.kimi import KimiProvider
+from visionauto.providers.config import ProviderConfig
+
+d = VisionDevice(
+    sn="emulator-5554",                       # USB 序列号 / WiFi adb "192.168.1.10:5555"
+    provider=KimiProvider(ProviderConfig(api_key="sk-xxx", model=Models.KIMI_K3)),
+    config=Config(implicit_wait=5),            # 框架行为（可选，独立解耦）
+)
 
 d.app_start("com.tencent.mm")
 d(text="微信").wait(timeout=15)
@@ -29,17 +37,29 @@ d(description="搜索输入框").input("你好")
 d(text="发送").click()
 ```
 
-## 配置
+不传 `provider` 时走环境变量 + registry：`VisionDevice(sn=None)`（`VISIONAUTO_PROVIDER/API_KEY/...`）。
 
-优先级：传参 > 环境变量 > 默认值。所有字段通用，不按 provider 区分。
+## 配置（两层分离）
+
+- **`ProviderConfig`**（`visionauto/providers/config.py`）——传输层，只管连模型：`api_key / model / base_url / extra_headers / temperature`。各 provider 自管理。
+- **`Config`**（`visionauto/config.py`）——框架行为层：`implicit_wait / resolve_retries / cache_ttl / default_timeout / opencv_* / normalize_text / debug / fail_dir`。
+
+优先级：传参 > 环境变量 > 默认值。
+
+ProviderConfig 字段：
 
 | 字段 | 环境变量 | 默认 | 说明 |
 | --- | --- | --- | --- |
-| `provider` | `VISIONAUTO_PROVIDER` | `glm` | `glm` / `qwen` / `openai` |
 | `api_key` | `VISIONAUTO_API_KEY` | - | API key |
-| `model` | `VISIONAUTO_MODEL` | provider 默认 | 模型名 |
+| `model` | `VISIONAUTO_MODEL` | provider 默认 | 模型名（可用 `Models.*` 常量） |
 | `base_url` | `VISIONAUTO_BASE_URL` | provider 默认 | OpenAI 兼容端点 |
-| `temperature` | `VISIONAUTO_TEMPERATURE` | `0.0` | 不支持的模型自动省略 |
+| `extra_headers` | `VISIONAUTO_EXTRA_HEADERS` | - | 自定义请求头（JSON 串 / dict） |
+| `temperature` | `VISIONAUTO_TEMPERATURE` | `0.0` | 默认 0 可复现；不支持的模型自动省略 |
+
+框架行为 Config 字段：
+
+| 字段 | 环境变量 | 默认 | 说明 |
+| --- | --- | --- | --- |
 | `opencv_threshold` | `VISIONAUTO_OPENCV_THRESHOLD` | `0.8` | image 兜底置信度 |
 | `opencv_method` | `VISIONAUTO_OPENCV_METHOD` | `auto` | `auto/template/multiscale/keypoint` |
 | `opencv_rgb` | `VISIONAUTO_OPENCV_RGB` | `True` | OpenCV 兜底 RGB 二次校验 |
@@ -58,7 +78,11 @@ d(text="发送").click()
 | --- | --- | --- |
 | `glm` | `GLM-5V-Turbo` | 智谱 `open.bigmodel.cn` |
 | `qwen` | `qwen3.7-max-2026-06-08` | 阿里 DashScope |
+| `kimi` | `kimi-k3` | 月之暗面 `api.moonshot.ai` |
+| `mimo` | `mimo-v2-omni` | 小米 `api.xiaomimimo.com` |
 | `openai` | （需自备） | OpenAI 兼容任意端点 |
+
+模型名用 `Models` 常量（`from visionauto import Models` 或 `visionauto.providers.models`）：`Models.KIMI_K3`、`Models.MIMO_V2_OMNI`、`Models.GLM_5V_TURBO`、`Models.QWEN3_7_MAX` 等。
 
 ## 选择器
 
@@ -221,29 +245,27 @@ register_provider("my", MyProvider)
 
 ```text
 visionauto/
-├── config.py            通用配置（api_key/model/base_url/阈值/超时/debug）
-├── device.py            VisionDevice: 包 u2.Device + d(...) 工厂 + 截图缓存 + dump
-├── selector.py          Selector: 懒执行链式 API（exists/click/wait/drag_to/swipe...）
-├── located.py           Located: bbox + text
-├── coords.py            [0,1] 规范坐标 → 设备像素，自适应 0-999/[0,1]/绝对像素
-├── cache.py             截图+解析短 TTL 缓存
-├── prompts.py           三套 prompt（统一 schema：clickable 节点 + bbox + OCR text）
-├── utils.py             json-repair 解析
-├── viz.py               标注绘图（trace 指令标签 / dump OCR 标签）
-├── debug.py             DebugRecorder: 自动记录每次 AI 识别 + 动作时间线
-├── exceptions.py        ElementNotFound 等
-├── providers/           传输+鉴权层（OpenAI 兼容）
-│   ├── base.py          OpenAICompatibleProvider + supports_temperature
-│   ├── glm.py           GLM（智谱）
-│   ├── qwen.py          Qwen（阿里 DashScope）
-│   └── openai.py        通用 OpenAI 兼容
+├── __init__.py          VisionDevice 单入口导出 + Models re-export
+├── config.py            【框架行为】implicit_wait/resolve_retries/cache_ttl/opencv/debug/...
+├── device.py            VisionDevice(sn=, provider=, config=)：内部 u2.connect(sn)
+├── selector.py          Selector: 懒执行链式 API（exists/click/wait/scroll_to/drag_to...）
+├── located.py / coords.py / cache.py / utils.py / viz.py / debug.py / exceptions.py
 ├── matching/            image 兜底：airtest OpenCV（template/multiscale/keypoint）
-│   └── opencv.py
-└── locator/             策略层
-    ├── text.py          一次 VLM 取全部可点击控件+OCR 文字，客户端按模式过滤
-    ├── description.py   语义定位：描述直接喂 AI
-    └── image.py         VLM 优先，airtest OpenCV 兜底
+├── locator/             策略层（text/description/image，prompt 来自 providers.prompts）
+└── providers/           【自包含 provider 包：传输层与框架行为解耦】
+    ├── __init__.py      registry + get_provider(name, ProviderConfig) + env 兜底
+    ├── config.py        【传输层】ProviderConfig: api_key/model/base_url/extra_headers/temperature
+    ├── models.py        Models 名录（聚合各 provider 的模型常量）
+    ├── prompts.py       三套 prompt（text/description/image）
+    ├── base.py          OpenAICompatibleProvider + extra_headers + 模型参数怪癖表
+    ├── glm.py           GLMProvider（自带 DEFAULT_*/模型常量/温度怪癖）
+    ├── qwen.py          QwenProvider（同上）
+    ├── kimi.py          KimiProvider（同上，最新 kimi-k3）
+    ├── mimo.py          MiMoProvider（同上）
+    └── openai.py        OpenAIProvider（通用）
 ```
+
+解耦要点：provider 只管「连模型」（ProviderConfig），框架行为独立（Config）；加新 provider = 丢一个文件 + 注册一行，不碰 config.py / locator。
 
 ## 示例
 

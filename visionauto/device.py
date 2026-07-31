@@ -9,21 +9,47 @@ from typing import Any
 from .cache import TTLCache
 from .config import Config
 from .debug import DebugRecorder
-from .providers import get_provider
+from .providers import get_provider_from_env
 from .providers.base import VisionProvider
 from .selector import Selector
 
 
 class VisionDevice:
-    def __init__(self, u2_device: Any, config: Config):
-        self._u2 = u2_device
-        self._config = config
-        self._provider: VisionProvider = get_provider(config)
-        self._cache = TTLCache(config.cache_ttl)
+    """Wrap a uiautomator2 device and add AI-vision selectors.
+
+    One entry point — no separate connect() call:
+
+        d = VisionDevice(
+            sn="emulator-5554",            # USB serial / WiFi adb "192.168.1.10:5555"
+            provider=KimiProvider(ProviderConfig(api_key=..., model=Models.KIMI_K3)),
+            config=Config(implicit_wait=5),  # framework behavior (optional)
+        )
+        d(text="你好").click()
+
+    ``provider`` is an instantiated provider (imported and configured by the
+    caller) — it only knows how to connect to the VLM. ``config`` is the
+    framework behavior Config (waits/retries/debug), fully decoupled from the
+    provider. If ``provider`` is omitted, one is built from env vars via the
+    registry (get_provider_from_env).
+    """
+
+    def __init__(
+        self,
+        sn: str | None = None,
+        provider: VisionProvider | None = None,
+        config: Config | None = None,
+        **config_overrides,
+    ):
+        import uiautomator2 as u2
+
+        self._u2 = u2.connect(sn) if sn else u2.connect()
+        self._config = config or Config.from_env(**config_overrides)
+        self._provider = provider or get_provider_from_env()
+        self._cache = TTLCache(self._config.cache_ttl)
         self._shot_bytes: bytes | None = None
         self._shot_size: tuple[int, int] | None = None
         self._shot_expires: float = 0.0
-        self._debug = DebugRecorder(config.debug_dir, config.debug)
+        self._debug = DebugRecorder(self._config.debug_dir, self._config.debug)
 
     # -- debug trace --------------------------------------------------------
 
