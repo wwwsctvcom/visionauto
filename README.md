@@ -10,7 +10,8 @@ uiautomator2 设备控制 + AI 视觉选择器。用 u2 做"手"（截图、点�
 ## 安装
 
 ```bash
-pip install -e ".[dev]"          # dev 含 pytest
+pip install visionauto            # 从 PyPI 安装
+# 或开发模式：pip install -e ".[dev]"
 adb devices                       # 确认有一台设备在线
 ```
 
