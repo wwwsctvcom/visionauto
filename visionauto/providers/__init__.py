@@ -1,43 +1,51 @@
-"""Provider registry. Add new VLM backends here and in _REGISTRY."""
+"""Provider layer.
+
+The framework talks to any OpenAI-compatible endpoint through ONE transport
+(``OpenAICompatibleProvider``). Named presets (``PROVIDER_PRESETS``) are just a
+convenience so users don't have to remember base_urls and a default vision
+model — you can always pass base_url/api_key/model directly to VisionDevice.
+
+Helpers kept for backward compatibility / tests:
+    get_provider("qwen", ProviderConfig(api_key=...))
+    get_provider_from_env()
+"""
 from __future__ import annotations
 
 import os
 
-from .base import VisionProvider
+from ..exceptions import ProviderConfigError
+from .base import OpenAICompatibleProvider, VisionProvider
 from .config import ProviderConfig
-from .glm import GLMProvider
-from .kimi import KimiProvider
-from .mimo import MiMoProvider
-from .openai import OpenAIProvider
-from .qwen import QwenProvider
-
-_REGISTRY: dict[str, type[VisionProvider]] = {
-    "glm": GLMProvider,
-    "qwen": QwenProvider,
-    "kimi": KimiProvider,
-    "mimo": MiMoProvider,
-    "openai": OpenAIProvider,
-}
+from .presets import PROVIDER_PRESETS
 
 
-def register_provider(name: str, cls: type[VisionProvider]) -> None:
-    _REGISTRY[name] = cls
+def register_provider(name: str, base_url: str | None, model: str | None = None) -> None:
+    """Register/override a named preset (base_url + optional default model)."""
+    PROVIDER_PRESETS[name.lower()] = {"base_url": base_url, "model": model}
 
 
-def get_provider(name: str, cfg: ProviderConfig) -> VisionProvider:
-    if name not in _REGISTRY:
-        raise ValueError(
-            f"unknown provider {name!r}; registered: {list(_REGISTRY)}"
+def get_provider(name: str, cfg: ProviderConfig | None = None) -> VisionProvider:
+    """Build a provider from a preset name; explicit cfg fields override the preset."""
+    preset = PROVIDER_PRESETS.get(name.lower())
+    if preset is None:
+        raise ProviderConfigError(
+            f"unknown provider {name!r}; known: {sorted(PROVIDER_PRESETS)}. "
+            f"也可以直接给 VisionDevice 传 base_url/api_key/model 而不使用预设名。"
         )
-    return _REGISTRY[name](cfg)
+    cfg = cfg or ProviderConfig()
+    merged = ProviderConfig(
+        api_key=cfg.api_key,
+        base_url=cfg.base_url or preset.get("base_url"),
+        model=cfg.model or preset.get("model"),
+        extra_headers=cfg.extra_headers,
+        temperature=cfg.temperature,
+        timeout=cfg.timeout,
+    )
+    return OpenAICompatibleProvider(merged)
 
 
 def get_provider_from_env(prefix: str = "VISIONAUTO") -> VisionProvider:
-    """Convenience: build a provider from env vars.
-
-    ``{PREFIX}_PROVIDER`` picks the provider name; the rest of the
-    ProviderConfig comes from ProviderConfig.from_env().
-    """
+    """Build a provider purely from env vars ({PREFIX}_PROVIDER/API_KEY/MODEL/BASE_URL)."""
     name = os.environ.get(f"{prefix}_PROVIDER", "glm")
     return get_provider(name, ProviderConfig.from_env(prefix))
 
@@ -45,11 +53,8 @@ def get_provider_from_env(prefix: str = "VISIONAUTO") -> VisionProvider:
 __all__ = [
     "VisionProvider",
     "ProviderConfig",
-    "GLMProvider",
-    "QwenProvider",
-    "KimiProvider",
-    "MiMoProvider",
-    "OpenAIProvider",
+    "OpenAICompatibleProvider",
+    "PROVIDER_PRESETS",
     "register_provider",
     "get_provider",
     "get_provider_from_env",

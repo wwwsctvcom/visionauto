@@ -9,34 +9,44 @@ from typing import Any
 from .cache import TTLCache
 from .config import Config
 from .debug import DebugRecorder
-from .providers import get_provider_from_env
+from .exceptions import ProviderConfigError
+from .providers import PROVIDER_PRESETS, OpenAICompatibleProvider
 from .providers.base import VisionProvider
+from .providers.config import ProviderConfig
 from .selector import Selector
 
 
 class VisionDevice:
     """Wrap a uiautomator2 device and add AI-vision selectors.
 
-    One entry point — no separate connect() call:
+    One entry point — no separate connect() call. 最简用法：直接给
+    base_url + api_key + model，框架内部封装好一切（模型怪癖、错误提示）：
 
         d = VisionDevice(
-            sn="emulator-5554",            # USB serial / WiFi adb "192.168.1.10:5555"
-            provider=KimiProvider(ProviderConfig(api_key=..., model=Models.KIMI_K3)),
-            config=Config(implicit_wait=5),  # framework behavior (optional)
+            sn="emulator-5554",                       # USB serial / WiFi adb "192.168.1.10:5555"
+            base_url="https://api.deepseek.com/v1",
+            api_key="sk-...",
+            model="deepseek-v4-flash-vision-exp",
         )
         d(text="你好").click()
 
-    ``provider`` is an instantiated provider (imported and configured by the
-    caller) — it only knows how to connect to the VLM. ``config`` is the
-    framework behavior Config (waits/retries/debug), fully decoupled from the
-    provider. If ``provider`` is omitted, one is built from env vars via the
-    registry (get_provider_from_env).
+    也可以用预设名省去记 base_url（model 可覆盖）：
+
+        VisionDevice(sn, provider="qwen", api_key="sk-...")
+
+    ``provider`` 也可传入一个已实例化的 provider 对象（高级用法）；三者都省略
+    时回落到环境变量 VISIONAUTO_PROVIDER / _API_KEY / _BASE_URL / _MODEL。
+
+    ``config`` 是框架行为 Config（waits/retries/debug），与传输层完全解耦。
     """
 
     def __init__(
         self,
         sn: str | None = None,
-        provider: VisionProvider | None = None,
+        base_url: str | None = None,
+        api_key: str | None = None,
+        model: str | None = None,
+        provider=None,
         config: Config | None = None,
         **config_overrides,
     ):
@@ -44,12 +54,43 @@ class VisionDevice:
 
         self._u2 = u2.connect(sn) if sn else u2.connect()
         self._config = config or Config.from_env(**config_overrides)
-        self._provider = provider or get_provider_from_env()
+        self._provider = self._build_provider(
+            provider=provider, base_url=base_url, api_key=api_key, model=model
+        )
         self._cache = TTLCache(self._config.cache_ttl)
         self._shot_bytes: bytes | None = None
         self._shot_size: tuple[int, int] | None = None
         self._shot_expires: float = 0.0
         self._debug = DebugRecorder(self._config.debug_dir, self._config.debug)
+
+    def _build_provider(self, provider, base_url, api_key, model):
+        """Resolve the VLM transport.
+
+        Precedence: 显式 kwarg > provider 预设名 > 环境变量。
+          - provider 是预设名（str）：补全 base_url/model 默认值（可被覆盖）；
+          - provider 是已实例化的 provider 对象：直接使用（高级用法）；
+          - 都没有：走环境变量；仍缺 api_key/model 时抛清晰的 ProviderConfigError。
+        """
+        if provider is not None and not isinstance(provider, str):
+            return provider
+        cfg = ProviderConfig.from_env()
+        name = provider if isinstance(provider, str) else os.environ.get("VISIONAUTO_PROVIDER")
+        if name:
+            preset = PROVIDER_PRESETS.get(name.lower())
+            if preset is None:
+                raise ProviderConfigError(
+                    f"unknown provider {name!r}; known: {sorted(PROVIDER_PRESETS)}. "
+                    f"也可以直接传 base_url/api_key/model，不使用预设名。"
+                )
+            cfg.base_url = cfg.base_url or preset.get("base_url")
+            cfg.model = cfg.model or preset.get("model")
+        if api_key is not None:
+            cfg.api_key = api_key
+        if base_url is not None:
+            cfg.base_url = base_url
+        if model is not None:
+            cfg.model = model
+        return OpenAICompatibleProvider(cfg)
 
     # -- debug trace --------------------------------------------------------
 

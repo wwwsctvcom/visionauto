@@ -17,45 +17,83 @@ adb devices                       # 确认有一台设备在线
 
 ## 快速开始
 
-一个入口 `VisionDevice(sn=, provider=, config=)`，无需单独 connect：
+一个入口 `VisionDevice(sn=, base_url=, api_key=, model=)`，无需单独 connect。**任何 OpenAI 兼容端点 + 多模态模型填进去就能用**，框架内部处理一切封装：
 
 ```python
-from visionauto import VisionDevice, Config, Models
-from visionauto.providers.kimi import KimiProvider
-from visionauto.providers.config import ProviderConfig
+from visionauto import VisionDevice
 
 d = VisionDevice(
-    sn="emulator-5554",                       # USB 序列号 / WiFi adb "192.168.1.10:5555"
-    provider=KimiProvider(ProviderConfig(api_key="sk-xxx", model=Models.KIMI_K3)),
-    config=Config(implicit_wait=5),            # 框架行为（可选，独立解耦）
+    sn="emulator-5554",                        # USB 序列号 / WiFi adb "192.168.1.10:5555"
+    base_url="https://api.deepseek.com/v1",    # 任意 OpenAI 兼容端点
+    api_key="sk-xxx",
+    model="deepseek-v4-flash-vision-exp",      # 任意多模态(VL)模型名
 )
 
 d.app_start("com.tencent.mm")
 d(text="微信").wait(timeout=15)
 
-d(description="右上角的搜索按钮").click()             # 图标无文字 → 语义定位
+d(description="右上角的搜索按钮").click()             # 图标无文字 -> 语义定位
 d(description="搜索输入框").input("你好")
 d(text="发送").click()
 ```
 
-不传 `provider` 时走环境变量 + registry：`VisionDevice(sn=None)`（`VISIONAUTO_PROVIDER/API_KEY/...`）。
+不想记 base_url？用**预设名**（等价于帮你填 base_url + 默认视觉模型，均可覆盖）：
+
+```python
+d = VisionDevice(sn, provider="qwen", api_key="sk-xxx")            # 阿里 DashScope
+d = VisionDevice(sn, provider="deepseek", api_key="sk-xxx")        # DeepSeek
+d = VisionDevice(sn, provider="glm", api_key="xxx.yyy")            # 智谱
+d = VisionDevice(sn, provider="kimi", api_key="sk-xxx")            # Moonshot 国际站
+d = VisionDevice(sn, provider="kimi-cn", api_key="sk-xxx")         # Moonshot 国内站
+d = VisionDevice(sn, provider="mimo", api_key="sk-xxx")            # 小米
+d = VisionDevice(sn, provider="openrouter", api_key="sk-or-...",
+                 model="moonshotai/kimi-k3")                       # 一把 key 用 100+ 模型
+```
+
+全部省略时走环境变量：`VISIONAUTO_API_KEY / _MODEL / _BASE_URL`（可选 `VISIONAUTO_PROVIDER` 指定预设名）。
+
+### 错误反馈（不用猜）
+
+模型调用失败时抛**具体的异常**，直接告诉你该改什么：
+
+| 异常 | 场景 |
+| --- | --- |
+| `ProviderConfigError` | 没给 api_key / model |
+| `ProviderAuthError` | api_key 无效（401/403），或 key 与平台不匹配（如 .cn/.ai 不互通） |
+| `ModelNotFoundError` | 模型名拼错 / 该平台无此模型（404 或 400 "Unsupported model"） |
+| `ImageNotSupportedError` | 该模型是**纯文本模型**（如 `deepseek-v4-flash`、`mimo-v2.5-pro`、MiniMax M 系列），不能用于视觉定位 |
+| `InsufficientBalanceError` | 账户余额不足/欠费（402 或 "insufficient balance"） |
+| `ProviderRateLimitError` | 触发限流（429） |
+| `ProviderConnectionError` | 连不上 base_url（网络/DNS/端点写错） |
+
+```python
+from visionauto import VisionDevice, ImageNotSupportedError, ProviderAuthError
+
+try:
+    d = VisionDevice(sn="emulator-5554", base_url="...", api_key="...", model="...")
+    d(text="设置").click()
+except ImageNotSupportedError as e:
+    print("换个多模态模型：", e)
+except ProviderAuthError as e:
+    print("检查 api_key：", e)
+```
 
 ## 配置（两层分离）
 
-- **`ProviderConfig`**（`visionauto/providers/config.py`）——传输层，只管连模型：`api_key / model / base_url / extra_headers / temperature`。各 provider 自管理。
-- **`Config`**（`visionauto/config.py`）——框架行为层：`implicit_wait / resolve_retries / cache_ttl / default_timeout / opencv_* / normalize_text / debug / fail_dir`。
+- **模型连接（传参即用）**：`base_url / api_key / model`（或预设名 `provider=`），框架内部统一封装：temperature 怪癖按模型名自动处理（thinking/reasoner 类不传、kimi-k2.7 系列强制 1.0），端点拒绝 `response_format`/`temperature` 时自动降级重试。也可用环境变量 `VISIONAUTO_API_KEY / _MODEL / _BASE_URL / _PROVIDER`。
+- **`Config`**（`visionauto/config.py`）--框架行为层：`implicit_wait / resolve_retries / cache_ttl / default_timeout / opencv_* / normalize_text / debug / fail_dir`。
 
-优先级：传参 > 环境变量 > 默认值。
+优先级：传参 > 环境变量 > 默认值。**不需要任何配置文件**。
 
-ProviderConfig 字段：
+模型连接参数（`VisionDevice` 构造参数 / 环境变量）：
 
-| 字段 | 环境变量 | 默认 | 说明 |
-| --- | --- | --- | --- |
-| `api_key` | `VISIONAUTO_API_KEY` | - | API key |
-| `model` | `VISIONAUTO_MODEL` | provider 默认 | 模型名（可用 `Models.*` 常量） |
-| `base_url` | `VISIONAUTO_BASE_URL` | provider 默认 | OpenAI 兼容端点 |
-| `extra_headers` | `VISIONAUTO_EXTRA_HEADERS` | - | 自定义请求头（JSON 串 / dict） |
-| `temperature` | `VISIONAUTO_TEMPERATURE` | `0.0` | 默认 0 可复现；不支持的模型自动省略 |
+| 参数 | 环境变量 | 说明 |
+| --- | --- | --- |
+| `base_url` | `VISIONAUTO_BASE_URL` | OpenAI 兼容端点；用预设名时可省 |
+| `api_key` | `VISIONAUTO_API_KEY` | 平台 API key（必填） |
+| `model` | `VISIONAUTO_MODEL` | 模型名，需为多模态(VL)模型（必填，预设名有默认值） |
+| `provider` | `VISIONAUTO_PROVIDER` | 预设名（可选便利） |
+| `timeout` | `VISIONAUTO_TIMEOUT` | 单次请求超时秒数，默认 120 |
 
 框架行为 Config 字段：
 
@@ -73,17 +111,25 @@ ProviderConfig 字段：
 | `debug` | `VISIONAUTO_DEBUG` | `False` | 调试追踪开关 |
 | `debug_dir` | `VISIONAUTO_DEBUG_DIR` | `out/trace` | 追踪输出目录 |
 
-内置 provider：
+内置预设名（只是 base_url + 默认视觉模型的速记，完全可不用）：
 
-| provider | 默认模型 | 默认端点 |
+| 预设名 | 默认模型 | 端点 |
 | --- | --- | --- |
 | `glm` | `GLM-5V-Turbo` | 智谱 `open.bigmodel.cn` |
-| `qwen` | `qwen3.7-max-2026-06-08` | 阿里 DashScope |
-| `kimi` | `kimi-k3` | 月之暗面 `api.moonshot.ai` |
-| `mimo` | `mimo-v2-omni` | 小米 `api.xiaomimimo.com` |
-| `openai` | （需自备） | OpenAI 兼容任意端点 |
+| `qwen` | `qwen3.8-max` | 阿里 DashScope |
+| `kimi` | `kimi-k3` | Moonshot 国际站 `api.moonshot.ai` |
+| `kimi-cn` | `kimi-k3` | Moonshot 国内站 `api.moonshot.cn`（与 .ai key 不互通） |
+| `mimo` | `mimo-v2.5` | 小米 `api.xiaomimimo.com` |
+| `deepseek` | `deepseek-v4-flash-vision-exp` | DeepSeek `api.deepseek.com` |
+| `openrouter` | （需指定，如 `qwen/qwen3.7-max`） | 聚合端点，一把 key 覆盖 100+ 模型 |
+| `openai` | （需指定） | OpenAI 官方端点 |
 
-模型名用 `Models` 常量（`from visionauto import Models` 或 `visionauto.providers.models`）：`Models.KIMI_K3`、`Models.MIMO_V2_OMNI`、`Models.GLM_5V_TURBO`、`Models.QWEN3_7_MAX` 等。
+模型名直接写字符串即可；也可用 `Models` 常量速记（`from visionauto import Models`）：`Models.KIMI_K3`、`Models.MIMO_V2_5`、`Models.GLM_5V_TURBO`、`Models.QWEN3_7_MAX`、`Models.DEEPSEEK_V4_FLASH_VISION_EXP` 等。
+
+**注意（已实测）**：
+- 必须使用**支持图像输入**的多模态模型；纯文本模型（如 `mimo-v2.5-pro`、`deepseek-v4-flash`、MiniMax M 系列、`glm-4.6`）会抛 `ImageNotSupportedError`。
+- Kimi 国际站（`.ai`）与国内站（`.cn`）key 不互通；国内站没有 `kimi-k2.7` 常规 ID，请用 `kimi-k2.7-code` / `kimi-k2.7-code-highspeed`。
+- `openrouter` 的 `model` 用"上游/模型"格式（如 `moonshotai/kimi-k3`、`xiaomi/mimo-v2.5`），视觉支持取决于具体模型（选 VLM）。
 
 ## 选择器
 
@@ -222,51 +268,43 @@ VLM 返回 `[x1,y1,x2,y2]`，GLM-V / Qwen-VL 通常归一化到 `0-999`。`coord
 
 内部统一转成 `[0,1]` 规范坐标，再 `device_x = vx * window_width`。返回的 JSON 先经 `json-repair` 修复（容忍尾逗号、单引号、代码围栏、夹带说明文字）再解析。
 
-## Provider 与扩展模型
+## 模型兼容性（框架内部自动处理）
 
-每个 provider 各自实现 `supports_temperature()`，对 thinking/reasoning 类模型（qwq、`*-thinking`、GLM-Z1、o1/o3 等）自动不传 `temperature`，普通模型传 `temperature=0`。
+- **temperature 怪癖**按模型名自动解析：thinking/reasoner 类（qwq、`*-thinking`、GLM-Z1、o1/o3、deepseek-r1）不传 `temperature`；`kimi-k2.5/2.6` 服务端管理不传；`kimi-k2.7` 系列强制 `temperature=1.0`；其余默认 `0`。
+- **json mode**：默认带 `response_format=json_object`，端点拒绝时自动去掉重试。
+- **坐标系量纲**：`coords.py` 自适应 `[0,1]` / `0-999` / 绝对像素。
 
-加一个新模型 provider：
+加一个新预设（只是速记，不写代码也能用）：
 
 ```python
-from visionauto.providers.base import OpenAICompatibleProvider
 from visionauto.providers import register_provider
 
-class MyProvider(OpenAICompatibleProvider):
-    DEFAULT_BASE_URL = "https://api.example.com/v1/"
-    DEFAULT_MODEL = "my-vl-model"
-    def supports_temperature(self) -> bool:
-        return "thinking" not in (self._model or "").lower()
-
-register_provider("my", MyProvider)
-# 然后 VISIONAUTO_PROVIDER=my
+register_provider("my", base_url="https://api.example.com/v1/", model="my-vl-model")
+# 之后：VisionDevice(sn, provider="my", api_key="sk-...")
 ```
 
 ## 架构
 
 ```text
 visionauto/
-├── __init__.py          VisionDevice 单入口导出 + Models re-export
+├── __init__.py          VisionDevice 单入口 + Models + 全部异常导出
 ├── config.py            【框架行为】implicit_wait/resolve_retries/cache_ttl/opencv/debug/...
-├── device.py            VisionDevice(sn=, provider=, config=)：内部 u2.connect(sn)
+├── device.py            VisionDevice(sn=, base_url/api_key/model 或 provider=, config=)
 ├── selector.py          Selector: 懒执行链式 API（exists/click/wait/scroll_to/drag_to...）
-├── located.py / coords.py / cache.py / utils.py / viz.py / debug.py / exceptions.py
+├── located.py / coords.py / cache.py / utils.py / viz.py / debug.py
+├── exceptions.py        异常体系：ElementNotFound + Provider 系列（Auth/NotFound/NoImage/...）
 ├── matching/            image 兜底：airtest OpenCV（template/multiscale/keypoint）
 ├── locator/             策略层（text/description/image，prompt 来自 providers.prompts）
-└── providers/           【自包含 provider 包：传输层与框架行为解耦】
-    ├── __init__.py      registry + get_provider(name, ProviderConfig) + env 兜底
-    ├── config.py        【传输层】ProviderConfig: api_key/model/base_url/extra_headers/temperature
-    ├── models.py        Models 名录（聚合各 provider 的模型常量）
+└── providers/           【统一传输层：一个 OpenAICompatibleProvider 走天下】
+    ├── __init__.py      get_provider(预设名) / get_provider_from_env / register_provider
+    ├── presets.py       预设名 -> {base_url, 默认视觉模型}
+    ├── config.py        ProviderConfig: api_key/model/base_url/temperature/timeout
+    ├── models.py        Models 常量速记（只收录多模态模型）
     ├── prompts.py       三套 prompt（text/description/image）
-    ├── base.py          OpenAICompatibleProvider + extra_headers + 模型参数怪癖表
-    ├── glm.py           GLMProvider（自带 DEFAULT_*/模型常量/温度怪癖）
-    ├── qwen.py          QwenProvider（同上）
-    ├── kimi.py          KimiProvider（同上，最新 kimi-k3）
-    ├── mimo.py          MiMoProvider（同上）
-    └── openai.py        OpenAIProvider（通用）
+    └── base.py          OpenAICompatibleProvider：模型怪癖 + 参数自适应降级 + 异常映射
 ```
 
-解耦要点：provider 只管「连模型」（ProviderConfig），框架行为独立（Config）；加新 provider = 丢一个文件 + 注册一行，不碰 config.py / locator。
+设计要点：**用户只需 base_url + api_key + model**；预设名只是速记。所有模型怪癖（temperature/response_format）与失败场景（key 无效/模型不存在/不支持图片/欠费/限流/连不上）都在 `base.py` 统一封装并映射为具体异常；框架行为（Config）与模型连接完全解耦。
 
 ## 示例
 
@@ -294,6 +332,6 @@ VISIONAUTO_API_KEY=... VISIONAUTO_PROVIDER=glm pytest -v -s tests/test_core_prom
 # 测试多个模型的图像问答能力
 VISIONAUTO_PROVIDER=qwen VISIONAUTO_API_KEY=sk-... \
 VISIONAUTO_TEST_IMAGE=./x.png \
-VISIONAUTO_TEST_MODELS=qwen3.7-max-2026-06-08,qwen3.7-plus \
+VISIONAUTO_TEST_MODELS=qwen3.8-max,qwen3.7-plus \
 pytest -v -s tests/test_provider_vision.py
 ```

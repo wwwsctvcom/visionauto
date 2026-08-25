@@ -20,6 +20,8 @@ class ProviderConfig:
     extra_headers: dict[str, str] | None = None
     # default 0 for reproducibility; providers that reject temperature omit it.
     temperature: float = 0.0
+    # per-request HTTP timeout (seconds); 0/None -> the openai SDK default.
+    timeout: float = 120.0
 
     @classmethod
     def from_env(cls, prefix: str = "VISIONAUTO", **overrides) -> "ProviderConfig":
@@ -37,6 +39,13 @@ class ProviderConfig:
                 kwargs["temperature"] = float(temp_env)
             except ValueError:
                 raise ValueError(f"{prefix}_TEMPERATURE={temp_env!r} is not a valid float")
+
+        timeout_env = os.environ.get(f"{prefix}_TIMEOUT")
+        if timeout_env is not None:
+            try:
+                kwargs["timeout"] = float(timeout_env)
+            except ValueError:
+                raise ValueError(f"{prefix}_TIMEOUT={timeout_env!r} is not a valid float")
 
         headers_env = os.environ.get(f"{prefix}_EXTRA_HEADERS")
         if headers_env is not None:

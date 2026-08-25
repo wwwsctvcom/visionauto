@@ -5,9 +5,10 @@ Three ways to set provider / api_key / base_url / model / sn (precedence high ->
   2. env vars:         VISIONAUTO_PROVIDER / _API_KEY / _BASE_URL / _MODEL / _SN
   3. DEFAULTS below:   edit this dict directly
 
-Edit DEFAULTS to hardcode your own, or pass flags at run time:
-    python examples/wechat_search.py --provider glm --api-key sk-xxx
-    python examples/search_download.py --provider mimo --sn 192.168.1.10:5555
+Edit DEFAULTS to match your account. model/base_url = None -> use the
+provider preset's built-in defaults (e.g. qwen -> qwen3.7-max + DashScope).
+NOTE: do NOT hardcode your api_key here - set it via env var or --api-key so
+it never lands in git. Examples will skip/run-only-with-key accordingly.
 """
 from __future__ import annotations
 
@@ -15,13 +16,9 @@ import argparse
 import os
 
 from visionauto import VisionDevice
-from visionauto.providers import get_provider
-from visionauto.providers.config import ProviderConfig
 
 # Edit these defaults to match your account. model/base_url = None -> use the
-# provider's built-in defaults (e.g. qwen -> qwen3.7-max + DashScope).
-# NOTE: do NOT hardcode your api_key here — set it via env var or --api-key so
-# it never lands in git. Examples will skip/run-only-with-key accordingly.
+# provider preset's built-in defaults (e.g. qwen -> qwen3.7-max + DashScope).
 DEFAULTS = {
     "provider": "qwen",
     "api_key": None,
@@ -54,9 +51,9 @@ def _resolve() -> dict:
 
 
 def connect() -> VisionDevice:
-    """Build a VisionDevice with the resolved provider config."""
-    overrides = _resolve()
-    name = overrides.pop("provider", "glm")
-    sn = overrides.pop("sn", None)
-    pcfg = ProviderConfig(**overrides)
-    return VisionDevice(sn=sn, provider=get_provider(name, pcfg))
+    """Build a VisionDevice with the resolved model connection.
+
+    VisionDevice natively accepts base_url/api_key/model (any OpenAI-compatible
+    endpoint) plus the optional provider preset name.
+    """
+    return VisionDevice(**_resolve())
