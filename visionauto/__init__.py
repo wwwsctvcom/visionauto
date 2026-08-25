@@ -1,7 +1,7 @@
 """visionauto: uiautomator2 device control with AI-vision selectors.
 
 One entry point — VisionDevice takes the device serial (sn) and the model
-connection. 最简用法，直接给 base_url + api_key + model::
+connection. Simplest usage - just pass base_url + api_key + model::
 
     from visionauto import VisionDevice
 
@@ -13,7 +13,8 @@ connection. 最简用法，直接给 base_url + api_key + model::
     )
     d(text="你好").click()
 
-也可用预设名省去记 base_url：VisionDevice(sn, provider="qwen", api_key="sk-...")。
+Or use a provider preset to skip remembering base_url:
+VisionDevice(sn, provider="qwen", api_key="sk-...").
 """
 from __future__ import annotations
 

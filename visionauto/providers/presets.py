@@ -18,7 +18,8 @@ PROVIDER_PRESETS: dict[str, dict[str, str | None]] = {
         "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
         "model": "qwen3.8-max",
     },
-    # Moonshot 国际站与国内站是两个平台、key 不互通，给两个预设名。
+    # Moonshot has two separate platforms with non-interchangeable keys,
+    # hence two preset names.
     "kimi": {
         "base_url": "https://api.moonshot.ai/v1",
         "model": "kimi-k3",
@@ -35,14 +36,15 @@ PROVIDER_PRESETS: dict[str, dict[str, str | None]] = {
         "base_url": "https://api.deepseek.com/v1",
         "model": "deepseek-v4-flash-vision-exp",
     },
-    # OpenRouter：一把 key 覆盖 100+ 模型，model 用 "上游/模型" 格式，
-    # 如 "qwen/qwen3.7-max"、"moonshotai/kimi-k3"、"xiaomi/mimo-v2.5"。
+    # OpenRouter: one key reaches 100+ models; model uses the
+    # "upstream/model" format, e.g. "qwen/qwen3.7-max", "moonshotai/kimi-k3",
+    # "xiaomi/mimo-v2.5".
     "openrouter": {
         "base_url": "https://openrouter.ai/api/v1",
-        "model": None,  # 必须显式给 model
+        "model": None,  # model must be given explicitly
     },
     "openai": {
-        "base_url": None,  # 走 openai SDK 默认端点
-        "model": None,     # 必须显式给 model
+        "base_url": None,  # use the openai SDK default endpoint
+        "model": None,     # model must be given explicitly
     },
 }

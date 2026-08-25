@@ -18,8 +18,9 @@ class ElementNotFound(VisionAutoError):
 
 
 # ---------------------------------------------------------------------------
-# Provider / transport errors — 模型端点 / 账号 / 配置类问题，附带可操作提示。
-# 这些才是用户最常撞到的，单独成类以便 `except` 精准捕获并给出指引。
+# Provider / transport errors - model endpoint / account / config problems,
+# each with an actionable hint. These are the ones users hit most often, so
+# they are separate classes for precise `except` handling.
 # ---------------------------------------------------------------------------
 
 
@@ -49,24 +50,27 @@ class ProviderConfigError(ProviderError):
 
 
 class ProviderAuthError(ProviderError):
-    """HTTP 401/403 — api_key 无效、过期，或不属于该 base_url 的平台。"""
+    """HTTP 401/403 — invalid/expired api_key, or a key that does not belong
+    to the base_url platform."""
 
 
 class ModelNotFoundError(ProviderError):
-    """HTTP 404 — 模型不存在、名字拼错，或该平台/账号未开通此模型。"""
+    """HTTP 404 — model does not exist, name misspelled, or not enabled for
+    this platform/account."""
 
 
 class ImageNotSupportedError(ProviderError):
-    """该模型是纯文本模型，不接受图像输入，无法用于视觉定位。"""
+    """The model is text-only and rejects image input, so it cannot be used
+    for vision locating."""
 
 
 class InsufficientBalanceError(ProviderError):
-    """HTTP 402 — 账户余额不足 / 欠费 / 被暂停。"""
+    """HTTP 402 — insufficient balance / suspended account."""
 
 
 class ProviderRateLimitError(ProviderError):
-    """HTTP 429 — 触发限流。"""
+    """HTTP 429 — rate limited."""
 
 
 class ProviderConnectionError(ProviderError):
-    """连不上 base_url（网络 / DNS / 端点写错）。"""
+    """Cannot reach base_url (network / DNS / wrong endpoint)."""

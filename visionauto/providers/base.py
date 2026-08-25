@@ -90,14 +90,16 @@ class OpenAICompatibleProvider:
             ) from e
         if not cfg.api_key:
             raise ProviderConfigError(
-                "缺少 api_key：请传入 api_key=... 或设置环境变量 VISIONAUTO_API_KEY",
+                "missing api_key: pass api_key=... or set the VISIONAUTO_API_KEY "
+                "environment variable",
                 model=cfg.model,
                 base_url=cfg.base_url,
             )
         if not cfg.model:
             raise ProviderConfigError(
-                "缺少 model：请传入 model=...（或 base_url=... 时一并给出模型名），"
-                "也可用 provider= 预设名 / 环境变量 VISIONAUTO_MODEL",
+                "missing model: pass model=... (or base_url=... together with a "
+                "model name), or use a provider preset / the VISIONAUTO_MODEL "
+                "environment variable",
                 model=cfg.model,
                 base_url=cfg.base_url,
             )
@@ -140,9 +142,9 @@ class OpenAICompatibleProvider:
             except Exception as exc:
                 self._raise_mapped(exc)  # raises for hard failures
                 if not self._maybe_drop_param(exc, kwargs, json_mode):
-                    # No adaptive retry applies — surface a readable error.
+                    # No adaptive retry applies - surface a readable error.
                     raise ProviderError(
-                        f"模型请求失败：{str(exc)[:200]}",
+                        f"model request failed: {str(exc)[:200]}",
                         model=self._model,
                         base_url=self.cfg.base_url,
                         status=getattr(exc, "status_code", None),
@@ -176,49 +178,57 @@ class OpenAICompatibleProvider:
         msg = str(exc)
         low = msg.lower()
         model = self._model
-        base = self.cfg.base_url or "<默认端点>"
+        base = self.cfg.base_url or "<default endpoint>"
 
-        if status is None:  # network / DNS / timeout — 连不上端点
+        if status is None:  # network / DNS / timeout
             raise ProviderConnectionError(
-                f"无法连接模型端点 {base}：请检查 base_url 是否正确、网络/代理是否可达。"
-                f"原始错误：{msg[:160]}",
+                f"cannot reach the model endpoint {base}: check that base_url is "
+                f"correct and the network/proxy is reachable. "
+                f"original error: {msg[:160]}",
                 model=model, base_url=self.cfg.base_url,
             )
         if status in (401, 403):
             raise ProviderAuthError(
-                f"API key 无效或没有权限（HTTP {status}）。请检查 api_key 是否正确，"
-                f"以及它是否属于 base_url 对应的平台（如 .cn/.ai、国内/国际 不互通）。"
-                f"原始错误：{msg[:160]}",
+                f"invalid or unauthorized API key (HTTP {status}). Check the "
+                f"api_key and that it belongs to the base_url platform "
+                f"(e.g. .cn/.ai - the two Moonshot platforms are not interchangeable). "
+                f"original error: {msg[:160]}",
                 model=model, base_url=self.cfg.base_url, status=status,
             )
         if status == 402 or "insufficient" in low or "balance" in low or "欠费" in low or "recharge" in low:
             raise InsufficientBalanceError(
-                f"账户余额不足 / 欠费，模型调用被拒绝。请充值或更换 key 后重试。"
-                f"原始错误：{msg[:160]}",
+                f"insufficient balance / suspended account - the model call was "
+                f"rejected. Recharge or use another key. "
+                f"original error: {msg[:160]}",
                 model=model, base_url=self.cfg.base_url, status=status,
             )
         if status == 404:
             if any(k in low for k in ("image", "vision", "视觉", "图像")):
                 raise ImageNotSupportedError(
-                    f"模型 {model!r} 没有可用的图像输入端点（多为纯文本模型），"
-                    f"无法用于视觉定位。请换成多模态/VL 模型。原始错误：{msg[:160]}",
+                    f"model {model!r} has no image-input endpoint (text-only "
+                    f"model) and cannot be used for vision locating. Use a "
+                    f"multimodal/VL model instead. original error: {msg[:160]}",
                     model=model, base_url=self.cfg.base_url, status=status,
                 )
             raise ModelNotFoundError(
-                f"模型不存在或未开通（HTTP 404）：{model!r}。请检查模型名拼写，"
-                f"或确认该平台/账号已开通此模型。原始错误：{msg[:160]}",
+                f"model not found or not enabled (HTTP 404): {model!r}. Check the "
+                f"model name spelling or whether this platform/account has it. "
+                f"original error: {msg[:160]}",
                 model=model, base_url=self.cfg.base_url, status=status,
             )
         if status == 429:
             raise ProviderRateLimitError(
-                f"触发限流（HTTP 429）。请降低调用频率或稍后再试。原始错误：{msg[:160]}",
+                f"rate limited (HTTP 429). Lower the request frequency or retry "
+                f"later. original error: {msg[:160]}",
                 model=model, base_url=self.cfg.base_url, status=status,
             )
-        # image rejected as 400 (e.g. deepseek "does not support image", glm "content.type 只允许 text")
+        # image rejected as 400 (e.g. deepseek "does not support image",
+        # glm "content.type only allows text")
         if status in (400, 422) and self._is_image_rejection(low):
             raise ImageNotSupportedError(
-                f"模型 {model!r} 不支持图像输入（纯文本模型），无法用于视觉定位。"
-                f"请换成多模态/VL 模型。原始错误：{msg[:160]}",
+                f"model {model!r} does not support image input (text-only model) "
+                f"and cannot be used for vision locating. Use a multimodal/VL "
+                f"model instead. original error: {msg[:160]}",
                 model=model, base_url=self.cfg.base_url, status=status,
             )
         # 400-family unknown-model wording (e.g. OpenRouter "not a valid model ID",
@@ -231,15 +241,16 @@ class OpenAICompatibleProvider:
             )
         ):
             raise ModelNotFoundError(
-                f"模型不存在或该平台未提供（HTTP {status}）：{model!r}。"
-                f"请检查模型名拼写，或确认该平台/账号已开通此模型。原始错误：{msg[:160]}",
+                f"model not found or not provided by this platform (HTTP {status}): "
+                f"{model!r}. Check the model name spelling or whether this "
+                f"platform/account has it. original error: {msg[:160]}",
                 model=model, base_url=self.cfg.base_url, status=status,
             )
-        return None  # not a hard failure — let the adaptive fallback try
+        return None  # not a hard failure - let the adaptive fallback try
 
     @staticmethod
     def _is_image_rejection(low: str) -> bool:
-        # 关键词尽量收窄，避免把普通的 400 误判成"不支持图片"。
+        # Keep the keyword list tight to avoid misclassifying generic 400s.
         image_words = ("does not support image", "not support image", "no endpoints found that support image",
                        "不支持图片", "不支持图像", "content.type", "multimodal")
         return any(w in low for w in image_words)

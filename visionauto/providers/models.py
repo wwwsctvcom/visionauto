@@ -3,7 +3,7 @@ string ``model="..."`` to ``VisionDevice``; these just save some typing).
 
 Only models verified to accept image input are listed, because visionauto needs
 multimodal models. Text-only variants (``mimo-v2.5-pro``, ``deepseek-v4-flash``,
-``glm-4.6``, MiniMax M 系列…) raise ImageNotSupportedError and are NOT here.
+``glm-4.6``, MiniMax M-series…) raise ImageNotSupportedError and are NOT here.
 """
 from __future__ import annotations
 

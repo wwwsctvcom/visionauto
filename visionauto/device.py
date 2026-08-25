@@ -19,8 +19,9 @@ from .selector import Selector
 class VisionDevice:
     """Wrap a uiautomator2 device and add AI-vision selectors.
 
-    One entry point — no separate connect() call. 最简用法：直接给
-    base_url + api_key + model，框架内部封装好一切（模型怪癖、错误提示）：
+    One entry point - no separate connect() call. Simplest usage: just pass
+    base_url + api_key + model; the framework handles every model quirk and
+    error message internally:
 
         d = VisionDevice(
             sn="emulator-5554",                       # USB serial / WiFi adb "192.168.1.10:5555"
@@ -30,14 +31,16 @@ class VisionDevice:
         )
         d(text="你好").click()
 
-    也可以用预设名省去记 base_url（model 可覆盖）：
+    Or use a provider preset to skip remembering base_url (model is overridable):
 
         VisionDevice(sn, provider="qwen", api_key="sk-...")
 
-    ``provider`` 也可传入一个已实例化的 provider 对象（高级用法）；三者都省略
-    时回落到环境变量 VISIONAUTO_PROVIDER / _API_KEY / _BASE_URL / _MODEL。
+    ``provider`` may also be an already-instantiated provider object (advanced);
+    if all are omitted the config falls back to the env vars
+    VISIONAUTO_PROVIDER / _API_KEY / _BASE_URL / _MODEL.
 
-    ``config`` 是框架行为 Config（waits/retries/debug），与传输层完全解耦。
+    ``config`` is the framework behavior Config (waits/retries/debug), fully
+    decoupled from the transport layer.
     """
 
     def __init__(
@@ -66,10 +69,12 @@ class VisionDevice:
     def _build_provider(self, provider, base_url, api_key, model):
         """Resolve the VLM transport.
 
-        Precedence: 显式 kwarg > provider 预设名 > 环境变量。
-          - provider 是预设名（str）：补全 base_url/model 默认值（可被覆盖）；
-          - provider 是已实例化的 provider 对象：直接使用（高级用法）；
-          - 都没有：走环境变量；仍缺 api_key/model 时抛清晰的 ProviderConfigError。
+        Precedence: explicit kwargs > provider preset > env vars.
+          - provider is a preset name (str): fill in base_url/model defaults
+            (each can still be overridden);
+          - provider is an instantiated provider object: used as-is (advanced);
+          - otherwise fall back to env vars; raise a clear ProviderConfigError
+            if api_key/model are still missing.
         """
         if provider is not None and not isinstance(provider, str):
             return provider
@@ -80,7 +85,7 @@ class VisionDevice:
             if preset is None:
                 raise ProviderConfigError(
                     f"unknown provider {name!r}; known: {sorted(PROVIDER_PRESETS)}. "
-                    f"也可以直接传 base_url/api_key/model，不使用预设名。"
+                    f"Or pass base_url/api_key/model directly without a preset name."
                 )
             cfg.base_url = cfg.base_url or preset.get("base_url")
             cfg.model = cfg.model or preset.get("model")

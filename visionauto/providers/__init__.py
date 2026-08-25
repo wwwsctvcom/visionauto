@@ -30,7 +30,8 @@ def get_provider(name: str, cfg: ProviderConfig | None = None) -> VisionProvider
     if preset is None:
         raise ProviderConfigError(
             f"unknown provider {name!r}; known: {sorted(PROVIDER_PRESETS)}. "
-            f"也可以直接给 VisionDevice 传 base_url/api_key/model 而不使用预设名。"
+            f"Or pass base_url/api_key/model directly to VisionDevice instead of "
+            f"using a preset name."
         )
     cfg = cfg or ProviderConfig()
     merged = ProviderConfig(
