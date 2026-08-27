@@ -152,7 +152,7 @@ def test_wait_stable_returns_false_when_never_settles():
     ) is False
 
 
-# -- v0.4.0 transports: request shapes, adaptive params, truncation ------------
+# -- v0.5.0 transports: request shapes, adaptive params, truncation ------------
 
 
 class FakeAPIError(Exception):
@@ -161,34 +161,28 @@ class FakeAPIError(Exception):
         self.status_code = status_code
 
 
-def _chat_transport(model="kimi-k3", sampling=None):
+def _chat_transport(model="kimi-k3", max_tokens=None):
     from visionauto.providers import create_transport
     return create_transport(
         base_url="https://api.moonshot.cn/v1",
         api_key="sk-x",
         model=model,
-        sampling=sampling,
+        max_tokens=max_tokens or 4096,
     )
 
 
 def test_chat_transport_request_shape():
-    t = _chat_transport(sampling={"max_tokens": 100, "top_k": 5})
+    t = _chat_transport(max_tokens=100)
     kw = t._build_request([b"img"], "prompt", json_mode=True)
     assert kw["model"] == "kimi-k3"
-    assert kw["temperature"] == 0.0           # no quirk: sampling default
     assert kw["max_tokens"] == 100
-    assert kw["top_k"] == 5
+    # no sampling params are ever sent - endpoint defaults apply
+    assert "temperature" not in kw and "top_p" not in kw and "top_k" not in kw
     assert kw["response_format"] == {"type": "json_object"}
     content = kw["messages"][0]["content"]
     assert content[0] == {"type": "text", "text": "prompt"}
     assert content[1]["type"] == "image_url"
     assert content[1]["image_url"]["url"].startswith("data:image/png;base64,")
-
-
-def test_chat_transport_thinking_model_omits_temperature():
-    t = _chat_transport(model="qwq-32b")
-    kw = t._build_request([b"img"], "p", json_mode=False)
-    assert "temperature" not in kw
 
 
 def test_maybe_drop_param_renames_max_tokens():
@@ -201,12 +195,12 @@ def test_maybe_drop_param_renames_max_tokens():
     assert kw == {"model": "gpt-5", "max_completion_tokens": 100}
 
 
-def test_maybe_drop_param_drops_top_k():
+def test_maybe_drop_param_drops_response_format():
     t = _chat_transport()
-    kw = {"model": "m", "top_k": 5, "temperature": 0}
-    err = FakeAPIError("unknown parameter: top_k", 400)
+    kw = {"model": "m", "response_format": {"type": "json_object"}, "max_tokens": 10}
+    err = FakeAPIError("response_format is not supported", 400)
     assert t._maybe_drop_param(err, kw) is True
-    assert "top_k" not in kw and kw["temperature"] == 0
+    assert "response_format" not in kw and kw["max_tokens"] == 10
 
 
 def test_maybe_drop_param_ignores_other_errors():
@@ -247,12 +241,10 @@ def test_invalid_api_format_rejected():
 def test_responses_transport_request_shape():
     from visionauto.providers import create_transport
     t = create_transport(base_url="https://api.openai.com/v1", api_key="sk-x",
-                         model="gpt-5", api_format="responses",
-                         sampling={"max_tokens": 512, "top_k": 5})
+                         model="gpt-5", api_format="responses", max_tokens=512)
     kw = t._build_request([b"img"], "p", json_mode=True)
     assert kw["model"] == "gpt-5"
     assert kw["max_output_tokens"] == 512      # protocol-specific key mapping
-    assert "top_k" not in kw                   # not part of the Responses API
     assert kw["text"] == {"format": {"type": "json_object"}}
     content = kw["input"][0]["content"]
     assert content[0] == {"type": "input_text", "text": "p"}
@@ -260,18 +252,15 @@ def test_responses_transport_request_shape():
 
 
 def test_messages_transport_request_shape():
-    anthropic = pytest.importorskip("anthropic")  # extra: visionauto[anthropic]
+    pytest.importorskip("anthropic")  # extra: visionauto[anthropic]
     from visionauto.providers import create_transport
     t = create_transport(base_url="https://api.anthropic.com", api_key="sk-ant-x",
                          model="claude-sonnet-4-5", api_format="messages",
-                         sampling={"max_tokens": 512, "top_k": 7})
+                         max_tokens=512)
     kw = t._build_request([b"img"], "p", json_mode=True)
     assert kw["model"] == "claude-sonnet-4-5"
-    assert kw["max_tokens"] == 512
-    # sampling params ride in extra_body (SDK >= 1.0 dropped them from the
-    # typed signature, but the HTTP API accepts them)
-    assert kw["extra_body"]["top_k"] == 7            # natively supported
-    assert "response_format" not in kw               # Messages API has no json mode
+    assert kw["max_tokens"] == 512            # required by Anthropic
+    assert "response_format" not in kw         # Messages API has no json mode
     block = kw["messages"][0]["content"][1]
     assert block["type"] == "image"
     assert block["source"]["type"] == "base64"
@@ -283,4 +272,4 @@ def test_messages_transport_default_max_tokens():
     t = create_transport(base_url="https://api.anthropic.com", api_key="sk-ant-x",
                          model="claude-sonnet-4-5", api_format="messages")
     kw = t._build_request([b"img"], "p", json_mode=False)
-    assert kw["max_tokens"] == 4096            # Anthropic requires it
+    assert kw["max_tokens"] == 8192            # Anthropic requires it

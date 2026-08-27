@@ -1,12 +1,12 @@
 """OpenAI Responses transport (/v1/responses).
 
 Uses the same ``openai`` package as the chat transport, via
-``client.responses.create``. ``top_k`` is not part of the Responses API and
-is silently ignored.
+``client.responses.create``. The protocol spells the output cap
+``max_output_tokens``.
 """
 from __future__ import annotations
 
-from .base import BaseTransport, _temperature_for, encode_data_url
+from .base import BaseTransport, encode_data_url
 
 
 class OpenAIResponsesTransport(BaseTransport):
@@ -33,17 +33,8 @@ class OpenAIResponsesTransport(BaseTransport):
         kwargs: dict = {
             "model": self._model,
             "input": [{"role": "user", "content": content}],
+            "max_output_tokens": self._max_tokens,
         }
-        s = self._sampling
-        temp = _temperature_for(self._model, s.temperature)
-        if temp is not None:
-            kwargs["temperature"] = temp
-        if s.max_tokens is not None:
-            kwargs["max_output_tokens"] = s.max_tokens
-        if s.top_p is not None:
-            kwargs["top_p"] = s.top_p
-        if s.extra:
-            kwargs.update(s.extra)
         if json_mode:
             kwargs["text"] = {"format": {"type": "json_object"}}
         return kwargs

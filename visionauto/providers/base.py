@@ -5,11 +5,15 @@ Three wire formats share everything except the request/response shapes:
   messages.py  - Anthropic Messages
   responses.py - OpenAI Responses
 
-Each subclass implements ``_init_client`` / ``_build_request`` / ``_request`` /
-``_parse_response``; this base supplies the retry loop, adaptive param
-dropping (temperature / top_k / json mode / max_tokens rename), temperature
-quirks by model name, truncation diagnosis, and the specific-error mapping
-with endpoint hints.
+Design: the framework sends NO sampling params (temperature/top_p/top_k) -
+those vary per model and are left to each endpoint's default. The only knob
+is ``max_tokens`` (the output cap), which every protocol has (under different
+key names) and which the framework must set anyway: Anthropic requires it,
+and aggregators like OpenRouter pre-authorize the model's full output budget
+when it is omitted. Each subclass implements ``_init_client`` /
+``_build_request`` / ``_request`` / ``_parse_response``; this base supplies
+the retry loop, adaptive param dropping (json mode, max_tokens rename),
+truncation diagnosis, and the specific-error mapping with endpoint hints.
 """
 from __future__ import annotations
 
@@ -27,10 +31,13 @@ from ..exceptions import (
     ProviderError,
     ProviderRateLimitError,
 )
-from .types import Model, Sampling
 
 # Normalization scale most VLMs emit for bbox coords (GLM-V/Qwen-VL: 0-999/0-1000).
 DEFAULT_NORM_SCALE = 1000.0
+# Output token cap sent with every request. Generous enough for a full screen
+# of bbox JSON plus thinking-model reasoning; not so large that low-balance
+# aggregator accounts get rejected outright.
+DEFAULT_MAX_TOKENS = 8192
 
 
 def encode_data_url(image: bytes, mime: str = "image/png") -> str:
@@ -50,26 +57,6 @@ class VisionProvider(Protocol):
         *,
         json_mode: bool = True,
     ) -> str: ...
-
-
-# --- model-name temperature quirks (model name is all the framework sees) ---
-# temperature server-managed / rejected -> omit the param entirely.
-_NO_TEMPERATURE_PREFIX = ("kimi-k2.5", "kimi-k2.6", "o1", "o3", "o4")
-_NO_TEMPERATURE_SUBSTR = ("qwq", "thinking", "reasoner", "deepseek-r1", "glm-z1", "-z1")
-# require temperature=1.0 (prefix match covers kimi-k2.7-code / -code-highspeed).
-_FORCE_TEMPERATURE_1_PREFIX = ("kimi-k2.7",)
-
-
-def _temperature_for(model: str, default: float | None) -> float | None:
-    """Resolve the temperature to send for a model, or None to omit it."""
-    name = (model or "").lower()
-    if any(name.startswith(p) for p in _FORCE_TEMPERATURE_1_PREFIX):
-        return 1.0
-    if any(name.startswith(p) for p in _NO_TEMPERATURE_PREFIX) or any(
-        p in name for p in _NO_TEMPERATURE_SUBSTR
-    ):
-        return None
-    return default
 
 
 # model-name prefix -> where such models usually live; used for error hints
@@ -105,8 +92,8 @@ class BaseTransport:
         *,
         base_url: str | None = None,
         api_key: str | None = None,
-        model: str | Model | None = None,
-        sampling: Sampling | None = None,
+        model: str | None = None,
+        max_tokens: int = DEFAULT_MAX_TOKENS,
         extra_headers: dict | None = None,
         timeout: float = 120.0,
     ):
@@ -114,20 +101,18 @@ class BaseTransport:
             raise ProviderConfigError(
                 "missing api_key: pass api_key=... or set the VISIONAUTO_API_KEY "
                 "environment variable",
-                model=str(model) if model else None,
+                model=model,
                 base_url=base_url,
             )
         if not model:
             raise ProviderConfigError(
-                "missing model: pass model=... (a model name or a Model preset)",
+                "missing model: pass model=... (a model name from your provider)",
                 base_url=base_url,
             )
         self._base_url = base_url
         self._api_key = api_key
-        # Model mixes in str, but normalize to a plain str so SDKs/JSON never
-        # see an enum repr.
-        self._model = model.value if isinstance(model, Model) else str(model)
-        self._sampling = sampling or Sampling()
+        self._model = str(model)
+        self._max_tokens = max_tokens
         self._extra_headers = extra_headers
         self._timeout = timeout
         self._init_client()
@@ -175,42 +160,32 @@ class BaseTransport:
             if truncated:
                 raise OutputTruncatedError(
                     f"model output was truncated by the max_tokens limit - the "
-                    f"returned JSON may be incomplete. Raise sampling.max_tokens "
-                    f"and retry.",
+                    f"returned JSON may be incomplete. Raise the max_tokens "
+                    f"argument and retry.",
                     model=self._model,
                     base_url=self._base_url,
                 )
             return text
 
     def _maybe_drop_param(self, exc: Exception, kwargs: dict) -> bool:
-        """If the endpoint rejected an optional sampling param, drop/rename it
-        and let the caller retry once. Returns True when kwargs was changed."""
+        """If the endpoint rejected an optional param, drop/rename it and let
+        the caller retry once. Returns True when kwargs was changed."""
         if getattr(exc, "status_code", None) not in (400, 422):
             return False
         low = str(exc).lower()
         # Rename first: OpenAI new-style models want max_completion_tokens.
-        # (Must precede the generic drop: "max_completion_tokens" contains
+        # (Must precede the drop check: "max_completion_tokens" contains
         # "max_tokens" as a substring.)
         if "max_completion_tokens" in low and "max_tokens" in kwargs:
             kwargs["max_completion_tokens"] = kwargs.pop("max_tokens")
             return True
-        aliases = {
-            "response_format": ("response_format", "json_object", "json mode", "json_mode"),
-            "temperature": ("temperature",),
-            "top_p": ("top_p",),
-            "top_k": ("top_k",),
-            "max_tokens": ("max_tokens",),
-            "max_completion_tokens": ("max_completion_tokens",),
-        }
-        extra_keys = set(self._sampling.extra or {})
-        for key in list(kwargs):
-            if key in extra_keys and key in low:
-                kwargs.pop(key)
-                return True
-            key_aliases = aliases.get(key)
-            if key_aliases and any(a in low for a in key_aliases):
-                kwargs.pop(key)
-                return True
+        # Some OpenAI-compatible endpoints reject response_format (json mode);
+        # the prompt itself already demands JSON, so dropping it is safe.
+        if kwargs.get("response_format") and any(
+            a in low for a in ("response_format", "json_object", "json mode", "json_mode")
+        ):
+            kwargs.pop("response_format", None)
+            return True
         return False
 
     # -- error mapping -------------------------------------------------------

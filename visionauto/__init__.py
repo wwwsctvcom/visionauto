@@ -9,12 +9,12 @@ connection. The connection is three plain values users already know::
         sn="emulator-5554",                 # USB serial / WiFi adb "192.168.1.10:5555"
         base_url="https://api.deepseek.com/v1",
         api_key="sk-xxx",
-        model="deepseek-v4-flash-vision-exp",   # or a Model preset
+        model="deepseek-v4-flash-vision-exp",   # a model name from your provider
     )
     d(text="你好").click()
 
-Optional sugar: api_format=ApiFormat.MESSAGES / RESPONSES (default CHAT) and
-sampling=Sampling(max_tokens=4096).
+Optional: api_format=ApiFormat.MESSAGES / RESPONSES (default CHAT) and
+max_tokens=8192 (output cap; thinking models may need more).
 """
 from __future__ import annotations
 
@@ -34,7 +34,7 @@ from .exceptions import (
     VisionAutoError,
 )
 from .located import Located
-from .providers.types import ApiFormat, Model, Sampling
+from .providers.types import ApiFormat
 from .selector import Selector
 
 __all__ = [
@@ -42,8 +42,6 @@ __all__ = [
     "Config",
     # connection types
     "ApiFormat",
-    "Model",
-    "Sampling",
     # selector layer
     "Selector",
     "Located",

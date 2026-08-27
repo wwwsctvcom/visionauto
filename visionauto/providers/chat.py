@@ -6,7 +6,7 @@ vLLM/Ollama self-hosting, ...
 """
 from __future__ import annotations
 
-from .base import BaseTransport, _temperature_for, encode_data_url
+from .base import BaseTransport, encode_data_url
 
 
 class ChatCompletionsTransport(BaseTransport):
@@ -35,29 +35,11 @@ class ChatCompletionsTransport(BaseTransport):
         kwargs: dict = {
             "model": self._model,
             "messages": [{"role": "user", "content": content}],
+            "max_tokens": self._max_tokens,
         }
-        kwargs.update(self._sampling_params())
         if json_mode:
             kwargs["response_format"] = {"type": "json_object"}
         return kwargs
-
-    def _sampling_params(self) -> dict:
-        s = self._sampling
-        params: dict = {}
-        temp = _temperature_for(self._model, s.temperature)
-        if temp is not None:
-            params["temperature"] = temp
-        if s.max_tokens is not None:
-            params["max_tokens"] = s.max_tokens
-        if s.top_p is not None:
-            params["top_p"] = s.top_p
-        if s.top_k is not None:
-            # Not in the OpenAI spec, but CN providers accept it; endpoints
-            # that reject it get one auto-drop retry in the base transport.
-            params["top_k"] = s.top_k
-        if s.extra:
-            params.update(s.extra)
-        return params
 
     def _request(self, kwargs: dict):
         return self._client.chat.completions.create(**kwargs)

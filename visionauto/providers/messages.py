@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import base64
 
-from .base import BaseTransport, _temperature_for
+from .base import BaseTransport
 
 
 class AnthropicMessagesTransport(BaseTransport):
@@ -46,29 +46,12 @@ class AnthropicMessagesTransport(BaseTransport):
                     "data": base64.b64encode(img).decode(),
                 },
             })
-        s = self._sampling
-        # Anthropic requires max_tokens; default to a generous value.
-        kwargs: dict = {
+        # Anthropic requires max_tokens on every request.
+        return {
             "model": self._model,
-            "max_tokens": s.max_tokens if s.max_tokens is not None else 4096,
+            "max_tokens": self._max_tokens,
             "messages": [{"role": "user", "content": content}],
         }
-        # Sampling params ride in extra_body: the Messages HTTP API accepts
-        # temperature/top_p/top_k, but anthropic SDK >= 1.0 dropped them from
-        # the typed signature. extra_body merges them into the JSON body.
-        body: dict = {}
-        temp = _temperature_for(self._model, s.temperature)
-        if temp is not None:
-            body["temperature"] = temp
-        if s.top_p is not None:
-            body["top_p"] = s.top_p
-        if s.top_k is not None:
-            body["top_k"] = s.top_k  # natively supported by Anthropic
-        if s.extra:
-            body.update(s.extra)
-        if body:
-            kwargs["extra_body"] = body
-        return kwargs
 
     def _request(self, kwargs: dict):
         return self._client.messages.create(**kwargs)

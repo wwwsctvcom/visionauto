@@ -39,7 +39,7 @@ Two optional kwargs extend coverage when needed (omit them entirely for the
 common case):
 
 ```python
-from visionauto import VisionDevice, ApiFormat, Sampling, Model
+from visionauto import VisionDevice, ApiFormat
 
 d = VisionDevice(
     sn="emulator-5554",
@@ -48,11 +48,8 @@ d = VisionDevice(
     model="claude-sonnet-4-5",
     api_format=ApiFormat.MESSAGES,        # default CHAT; MESSAGES/RESPONSES for
                                          # Anthropic / OpenAI native protocols
-    sampling=Sampling(max_tokens=4096),   # defaults are sane; None = omit
+    max_tokens=8192,                      # output cap; thinking models may need more
 )
-# Model presets are plain strings with IDE completion:
-d = VisionDevice(sn, base_url="https://dashscope.../v1", api_key="sk-xxx",
-                 model=Model.QWEN3_8_MAX)     # Model.QWEN3_8_MAX == "qwen3.8-max"
 ```
 
 Omitted connection args fall back to env vars:
@@ -77,10 +74,11 @@ Omitted connection args fall back to env vars:
 - Use a **multimodal** model. Text-only models (`mimo-v2.5-pro`,
   `deepseek-v4-flash`, MiniMax M-series, `glm-4.6`) raise
   `ImageNotSupportedError`.
-- Sampling quirks are absorbed by the framework: rejected params are
-  auto-dropped with one retry, `max_tokens` is auto-renamed to
-  `max_completion_tokens` where required, and truncated output raises
-  `OutputTruncatedError` telling you to raise `sampling.max_tokens`.
+- The framework sends **no sampling params** (temperature/top_p/top_k) - each
+  endpoint applies its own defaults, so model-specific quirks never leak into
+  your tests. The only knob is `max_tokens` (output cap, default 8192),
+  renamed per protocol (`max_completion_tokens` / `max_output_tokens`) where
+  required; truncated output raises `OutputTruncatedError`.
 - `ApiFormat.MESSAGES` appends `/v1/messages` to base_url, so the Anthropic
   official endpoint is `https://api.anthropic.com` (no `/v1` suffix) and
   OpenRouter's is `https://openrouter.ai/api`. Thinking models
@@ -100,7 +98,7 @@ Failed model calls raise a specific exception telling you what to fix
 | `InsufficientBalanceError` | account balance too low / suspended (402) |
 | `ProviderRateLimitError` | rate limited (429) |
 | `ProviderConnectionError` | cannot reach base_url (network/DNS/wrong endpoint) |
-| `OutputTruncatedError` | output cut off by max_tokens - raise `sampling.max_tokens` |
+| `OutputTruncatedError` | output cut off by max_tokens - raise the `max_tokens` argument |
 
 ## Selectors
 

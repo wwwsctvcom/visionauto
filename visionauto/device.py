@@ -9,9 +9,9 @@ from typing import Any
 from .cache import TTLCache
 from .config import Config
 from .debug import DebugRecorder
-from .providers import create_transport
+from .providers import DEFAULT_MAX_TOKENS, create_transport
 from .providers.base import VisionProvider
-from .providers.types import ApiFormat, Model, Sampling
+from .providers.types import ApiFormat
 from .selector import Selector
 
 
@@ -65,18 +65,19 @@ class VisionDevice:
 
         d = VisionDevice(
             sn="emulator-5554",                        # USB serial / WiFi adb "192.168.1.10:5555"
-            base_url="https://api.deepseek.com/v1",    # any OpenAI-compatible endpoint
+            base_url="https://api.deepseek.com/v1",    # any model endpoint (see README table)
             api_key="sk-xxx",
-            model="deepseek-v4-flash-vision-exp",      # a model name or a Model preset
+            model="deepseek-v4-flash-vision-exp",      # a model name from your provider
         )
         d(text="你好").click()
 
-    Two optional kwargs add coverage when needed:
-        api_format=ApiFormat.MESSAGES   # CHAT (default) | MESSAGES | RESPONSES
-        sampling=Sampling(max_tokens=4096)
+    Two optional kwargs:
+        api_format=ApiFormat.MESSAGES  # CHAT (default) | MESSAGES | RESPONSES
+        max_tokens=8192                # output cap (default); thinking models
+                                       # may need more
 
     Omitted connection args fall back to env vars
-    VISIONAUTO_API_KEY / _BASE_URL / _MODEL / _API_FORMAT.
+    VISIONAUTO_API_KEY / _BASE_URL / _MODEL / _API_FORMAT / _MAX_TOKENS.
 
     ``config`` is the framework behavior Config (waits/retries/debug), fully
     decoupled from the model connection.
@@ -87,9 +88,9 @@ class VisionDevice:
         sn: str | None = None,
         base_url: str | None = None,
         api_key: str | None = None,
-        model: str | Model | None = None,
+        model: str | None = None,
         api_format: ApiFormat | str | None = None,
-        sampling: Sampling | dict | None = None,
+        max_tokens: int | None = None,
         config: Config | None = None,
         **config_overrides,
     ):
@@ -99,7 +100,7 @@ class VisionDevice:
         self._config = config or Config.from_env(**config_overrides)
         self._provider = self._build_provider(
             base_url=base_url, api_key=api_key, model=model,
-            api_format=api_format, sampling=sampling,
+            api_format=api_format, max_tokens=max_tokens,
         )
         self._cache = TTLCache(self._config.cache_ttl)
         self._shot_bytes: bytes | None = None
@@ -107,14 +108,15 @@ class VisionDevice:
         self._shot_expires: float = 0.0
         self._debug = DebugRecorder(self._config.debug_dir, self._config.debug)
 
-    def _build_provider(self, base_url, api_key, model, api_format, sampling):
+    def _build_provider(self, base_url, api_key, model, api_format, max_tokens):
         """Resolve the model connection. Explicit kwargs > env vars."""
+        mt_env = os.environ.get("VISIONAUTO_MAX_TOKENS")
         return create_transport(
             base_url=base_url or os.environ.get("VISIONAUTO_BASE_URL"),
             api_key=api_key or os.environ.get("VISIONAUTO_API_KEY"),
             model=model or os.environ.get("VISIONAUTO_MODEL"),
             api_format=api_format or os.environ.get("VISIONAUTO_API_FORMAT") or ApiFormat.CHAT,
-            sampling=sampling,
+            max_tokens=max_tokens or (int(mt_env) if mt_env else DEFAULT_MAX_TOKENS),
         )
 
     # -- debug trace --------------------------------------------------------
