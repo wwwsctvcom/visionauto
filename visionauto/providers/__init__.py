@@ -1,62 +1,68 @@
-"""Provider layer.
+"""Model connection layer (internal).
 
-The framework talks to any OpenAI-compatible endpoint through ONE transport
-(``OpenAICompatibleProvider``). Named presets (``PROVIDER_PRESETS``) are just a
-convenience so users don't have to remember base_urls and a default vision
-model — you can always pass base_url/api_key/model directly to VisionDevice.
-
-Helpers kept for backward compatibility / tests:
-    get_provider("qwen", ProviderConfig(api_key=...))
-    get_provider_from_env()
+Users never touch this package directly: they pass base_url / api_key /
+model / api_format / sampling straight to ``VisionDevice``, which builds the
+right transport here. The user-facing types live in ``providers.types`` and
+are re-exported from the ``visionauto`` top level.
 """
 from __future__ import annotations
 
-import os
-
 from ..exceptions import ProviderConfigError
-from .base import OpenAICompatibleProvider, VisionProvider
-from .config import ProviderConfig
-from .presets import PROVIDER_PRESETS
+from .base import BaseTransport, VisionProvider
+from .chat import ChatCompletionsTransport
+from .messages import AnthropicMessagesTransport
+from .responses import OpenAIResponsesTransport
+from .types import ApiFormat, Model, Sampling
+
+_TRANSPORTS: dict[ApiFormat, type[BaseTransport]] = {
+    ApiFormat.CHAT: ChatCompletionsTransport,
+    ApiFormat.MESSAGES: AnthropicMessagesTransport,
+    ApiFormat.RESPONSES: OpenAIResponsesTransport,
+}
 
 
-def register_provider(name: str, base_url: str | None, model: str | None = None) -> None:
-    """Register/override a named preset (base_url + optional default model)."""
-    PROVIDER_PRESETS[name.lower()] = {"base_url": base_url, "model": model}
-
-
-def get_provider(name: str, cfg: ProviderConfig | None = None) -> VisionProvider:
-    """Build a provider from a preset name; explicit cfg fields override the preset."""
-    preset = PROVIDER_PRESETS.get(name.lower())
-    if preset is None:
+def create_transport(
+    *,
+    base_url: str | None = None,
+    api_key: str | None = None,
+    model: str | Model | None = None,
+    api_format: ApiFormat | str = ApiFormat.CHAT,
+    sampling: Sampling | dict | None = None,
+    extra_headers: dict | None = None,
+    timeout: float = 120.0,
+) -> VisionProvider:
+    """Build the transport matching ``api_format`` (validated up front)."""
+    try:
+        fmt = ApiFormat(api_format)
+    except ValueError:
+        valid = [f.value for f in ApiFormat]
         raise ProviderConfigError(
-            f"unknown provider {name!r}; known: {sorted(PROVIDER_PRESETS)}. "
-            f"Or pass base_url/api_key/model directly to VisionDevice instead of "
-            f"using a preset name."
+            f"invalid api_format {api_format!r}; valid values: {valid}",
+            model=str(model) if model else None,
+            base_url=base_url,
         )
-    cfg = cfg or ProviderConfig()
-    merged = ProviderConfig(
-        api_key=cfg.api_key,
-        base_url=cfg.base_url or preset.get("base_url"),
-        model=cfg.model or preset.get("model"),
-        extra_headers=cfg.extra_headers,
-        temperature=cfg.temperature,
-        timeout=cfg.timeout,
+    if sampling is None:
+        sampling = Sampling()
+    elif isinstance(sampling, dict):
+        sampling = Sampling(**sampling)
+    return _TRANSPORTS[fmt](
+        base_url=base_url,
+        api_key=api_key,
+        model=model,
+        sampling=sampling,
+        extra_headers=extra_headers,
+        timeout=timeout,
     )
-    return OpenAICompatibleProvider(merged)
-
-
-def get_provider_from_env(prefix: str = "VISIONAUTO") -> VisionProvider:
-    """Build a provider purely from env vars ({PREFIX}_PROVIDER/API_KEY/MODEL/BASE_URL)."""
-    name = os.environ.get(f"{prefix}_PROVIDER", "glm")
-    return get_provider(name, ProviderConfig.from_env(prefix))
 
 
 __all__ = [
+    "create_transport",
     "VisionProvider",
-    "ProviderConfig",
-    "OpenAICompatibleProvider",
-    "PROVIDER_PRESETS",
-    "register_provider",
-    "get_provider",
-    "get_provider_from_env",
+    "BaseTransport",
+    "ChatCompletionsTransport",
+    "AnthropicMessagesTransport",
+    "OpenAIResponsesTransport",
+    "ApiFormat",
+    "Model",
+    "Sampling",
 ]

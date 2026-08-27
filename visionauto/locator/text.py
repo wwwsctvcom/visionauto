@@ -44,7 +44,14 @@ class TextLocator:
         self.normalize = normalize_text
         self.match_all = match_all
 
-    def resolve(self, screenshot, width, height, provider: VisionProvider) -> list[Located]:
+    def fetch_nodes(
+        self, screenshot, width, height, provider: VisionProvider
+    ) -> list[Located]:
+        """Ask the VLM for every clickable node on the screen.
+
+        The TEXT_PROMPT is query-agnostic (it lists the whole screen), so this
+        result is cached per frame and shared by all text-series queries.
+        """
         raw = provider.chat([screenshot], TEXT_PROMPT, json_mode=True)
         data = parse_json(raw)
         norm_scale = getattr(provider, "norm_scale", 1000.0)
@@ -58,10 +65,17 @@ class TextLocator:
             )
             if not boxes:
                 continue
-            loc = Located(
-                bbox=boxes[0],
-                text=node.get("text") or None,
-            )
-            if self.match_all or _match(loc, self.query, self.normalize):
-                out.append(loc)
+            out.append(Located(bbox=boxes[0], text=node.get("text") or None))
         return out
+
+    def filter(self, nodes: list[Located]) -> list[Located]:
+        """Filter fetched nodes against the query (pure, client-side)."""
+        if self.match_all:
+            return list(nodes)
+        return [n for n in nodes if _match(n, self.query, self.normalize)]
+
+    def resolve(
+        self, screenshot, width, height, provider: VisionProvider
+    ) -> list[Located]:
+        """fetch_nodes + filter in one shot (used by VisionDevice.dump)."""
+        return self.filter(self.fetch_nodes(screenshot, width, height, provider))

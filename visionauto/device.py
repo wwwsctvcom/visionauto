@@ -9,38 +9,77 @@ from typing import Any
 from .cache import TTLCache
 from .config import Config
 from .debug import DebugRecorder
-from .exceptions import ProviderConfigError
-from .providers import PROVIDER_PRESETS, OpenAICompatibleProvider
+from .providers import create_transport
 from .providers.base import VisionProvider
-from .providers.config import ProviderConfig
+from .providers.types import ApiFormat, Model, Sampling
 from .selector import Selector
+
+
+# -- page stability (perceptual hashing) -----------------------------------
+
+
+def _ahash(png: bytes) -> int:
+    """64-bit perceptual hash (aHash) of a screenshot."""
+    from PIL import Image
+
+    img = Image.open(io.BytesIO(png)).convert("L").resize((8, 8))
+    pixels = list(img.tobytes())
+    avg = sum(pixels) / len(pixels)
+    bits = 0
+    for p in pixels:
+        bits = (bits << 1) | (1 if p >= avg else 0)
+    return bits
+
+
+def _wait_frames_stable(
+    fetch, timeout: float, stable_frames: int = 2,
+    interval: float = 0.5, max_diff: int = 2,
+) -> bool:
+    """Poll ``fetch()`` (returns fresh PNG bytes) until the screen settles.
+
+    Returns True once ``stable_frames`` consecutive frame pairs are
+    near-identical (Hamming distance <= ``max_diff`` out of 64 bits),
+    False on timeout.
+    """
+    deadline = time.monotonic() + timeout
+    prev: int | None = None
+    stable = 0
+    while time.monotonic() < deadline:
+        cur = _ahash(fetch())
+        if prev is not None and bin(prev ^ cur).count("1") <= max_diff:
+            stable += 1
+            if stable >= stable_frames:
+                return True
+        else:
+            stable = 0
+        prev = cur
+        time.sleep(interval)
+    return False
 
 
 class VisionDevice:
     """Wrap a uiautomator2 device and add AI-vision selectors.
 
-    One entry point - no separate connect() call. Simplest usage: just pass
-    base_url + api_key + model; the framework handles every model quirk and
-    error message internally:
+    One entry point - no separate connect() call. The model connection is
+    three plain values users already know:
 
         d = VisionDevice(
-            sn="emulator-5554",                       # USB serial / WiFi adb "192.168.1.10:5555"
-            base_url="https://api.deepseek.com/v1",
-            api_key="sk-...",
-            model="deepseek-v4-flash-vision-exp",
+            sn="emulator-5554",                        # USB serial / WiFi adb "192.168.1.10:5555"
+            base_url="https://api.deepseek.com/v1",    # any OpenAI-compatible endpoint
+            api_key="sk-xxx",
+            model="deepseek-v4-flash-vision-exp",      # a model name or a Model preset
         )
         d(text="你好").click()
 
-    Or use a provider preset to skip remembering base_url (model is overridable):
+    Two optional kwargs add coverage when needed:
+        api_format=ApiFormat.MESSAGES   # CHAT (default) | MESSAGES | RESPONSES
+        sampling=Sampling(max_tokens=4096)
 
-        VisionDevice(sn, provider="qwen", api_key="sk-...")
-
-    ``provider`` may also be an already-instantiated provider object (advanced);
-    if all are omitted the config falls back to the env vars
-    VISIONAUTO_PROVIDER / _API_KEY / _BASE_URL / _MODEL.
+    Omitted connection args fall back to env vars
+    VISIONAUTO_API_KEY / _BASE_URL / _MODEL / _API_FORMAT.
 
     ``config`` is the framework behavior Config (waits/retries/debug), fully
-    decoupled from the transport layer.
+    decoupled from the model connection.
     """
 
     def __init__(
@@ -48,8 +87,9 @@ class VisionDevice:
         sn: str | None = None,
         base_url: str | None = None,
         api_key: str | None = None,
-        model: str | None = None,
-        provider=None,
+        model: str | Model | None = None,
+        api_format: ApiFormat | str | None = None,
+        sampling: Sampling | dict | None = None,
         config: Config | None = None,
         **config_overrides,
     ):
@@ -58,7 +98,8 @@ class VisionDevice:
         self._u2 = u2.connect(sn) if sn else u2.connect()
         self._config = config or Config.from_env(**config_overrides)
         self._provider = self._build_provider(
-            provider=provider, base_url=base_url, api_key=api_key, model=model
+            base_url=base_url, api_key=api_key, model=model,
+            api_format=api_format, sampling=sampling,
         )
         self._cache = TTLCache(self._config.cache_ttl)
         self._shot_bytes: bytes | None = None
@@ -66,36 +107,15 @@ class VisionDevice:
         self._shot_expires: float = 0.0
         self._debug = DebugRecorder(self._config.debug_dir, self._config.debug)
 
-    def _build_provider(self, provider, base_url, api_key, model):
-        """Resolve the VLM transport.
-
-        Precedence: explicit kwargs > provider preset > env vars.
-          - provider is a preset name (str): fill in base_url/model defaults
-            (each can still be overridden);
-          - provider is an instantiated provider object: used as-is (advanced);
-          - otherwise fall back to env vars; raise a clear ProviderConfigError
-            if api_key/model are still missing.
-        """
-        if provider is not None and not isinstance(provider, str):
-            return provider
-        cfg = ProviderConfig.from_env()
-        name = provider if isinstance(provider, str) else os.environ.get("VISIONAUTO_PROVIDER")
-        if name:
-            preset = PROVIDER_PRESETS.get(name.lower())
-            if preset is None:
-                raise ProviderConfigError(
-                    f"unknown provider {name!r}; known: {sorted(PROVIDER_PRESETS)}. "
-                    f"Or pass base_url/api_key/model directly without a preset name."
-                )
-            cfg.base_url = cfg.base_url or preset.get("base_url")
-            cfg.model = cfg.model or preset.get("model")
-        if api_key is not None:
-            cfg.api_key = api_key
-        if base_url is not None:
-            cfg.base_url = base_url
-        if model is not None:
-            cfg.model = model
-        return OpenAICompatibleProvider(cfg)
+    def _build_provider(self, base_url, api_key, model, api_format, sampling):
+        """Resolve the model connection. Explicit kwargs > env vars."""
+        return create_transport(
+            base_url=base_url or os.environ.get("VISIONAUTO_BASE_URL"),
+            api_key=api_key or os.environ.get("VISIONAUTO_API_KEY"),
+            model=model or os.environ.get("VISIONAUTO_MODEL"),
+            api_format=api_format or os.environ.get("VISIONAUTO_API_FORMAT") or ApiFormat.CHAT,
+            sampling=sampling,
+        )
 
     # -- debug trace --------------------------------------------------------
 
@@ -165,6 +185,31 @@ class VisionDevice:
     def implicitly_wait(self, seconds: float) -> None:
         """Set implicit wait: exists()/actions poll up to this many seconds."""
         self._config.implicit_wait = seconds
+
+    # -- page stability -----------------------------------------------------
+
+    def wait_stable(
+        self,
+        timeout: float | None = None,
+        stable_frames: int = 2,
+        interval: float = 0.5,
+        max_diff: int = 2,
+    ) -> bool:
+        """Wait until the screen stops changing (page loaded / animation done).
+
+        Polls fresh screenshots and compares perceptual hashes. Returns True
+        once ``stable_frames`` consecutive frame pairs are near-identical
+        (Hamming distance <= ``max_diff`` out of 64 bits), False on timeout.
+        The settled frame stays cached, so the next selector call reuses it.
+        """
+        timeout = self._config.default_timeout if timeout is None else timeout
+        return _wait_frames_stable(
+            lambda: self._screenshot(force=True)[0],
+            timeout,
+            stable_frames=stable_frames,
+            interval=interval,
+            max_diff=max_diff,
+        )
 
     # -- assertions (auto-screenshot on failure) ----------------------------
 

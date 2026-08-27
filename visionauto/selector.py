@@ -4,7 +4,14 @@ from __future__ import annotations
 import time
 from typing import TYPE_CHECKING
 
-from .exceptions import ElementNotFound
+from .exceptions import (
+    ElementNotFound,
+    ImageNotSupportedError,
+    InsufficientBalanceError,
+    ModelNotFoundError,
+    ProviderAuthError,
+    ProviderConfigError,
+)
 from .locator.image import ImageLocator
 from .locator.text import TextLocator
 from .locator.description import DescriptionLocator
@@ -12,6 +19,17 @@ from .located import Located
 
 if TYPE_CHECKING:
     from .device import VisionDevice
+
+# Deterministic provider failures - retrying cannot fix them, so they surface
+# immediately instead of being masked as "element not found". Transient ones
+# (rate limit, connection blip, empty result) still go through the retry loop.
+_HARD_PROVIDER_ERRORS = (
+    ProviderConfigError,
+    ProviderAuthError,
+    ModelNotFoundError,
+    ImageNotSupportedError,
+    InsufficientBalanceError,
+)
 
 
 class Selector:
@@ -36,7 +54,6 @@ class Selector:
         return TextLocator(self._query, normalize_text=cfg.normalize_text)
 
     def _resolve(self, force_shot: bool = False) -> list[Located]:
-        cfg = self._device._config
         shot, (w, h) = self._device._screenshot(force=force_shot)
         key = (hash(shot), tuple(sorted(self._query.items())))
         cached = self._device._cache.get(key)
@@ -47,19 +64,25 @@ class Selector:
             )
             return cached
 
+        provider = self._device._provider
         locator = self._locator()
-        locs: list[Located] = []
-        # AI resolve retry: re-screenshot and re-ask on empty/exception, so a
-        # single flaky frame doesn't cause a false not-found.
-        for attempt in range(cfg.resolve_retries + 1):
-            try:
-                locs = locator.resolve(shot, w, h, self._device._provider)
-            except Exception:
-                locs = []
-            if locs:
-                break
-            if attempt < cfg.resolve_retries:
-                shot, (w, h) = self._device._screenshot(force=True)
+        if self._kind() == "text":
+            # All text queries on one frame share a single full-node AI call;
+            # each query then filters the shared node list client-side.
+            frame_key = ("__frame_nodes__", hash(shot))
+            nodes = self._device._cache.get(frame_key)
+            if nodes is None:
+                shot, nodes = self._retry_ask(
+                    lambda s, ww, hh: locator.fetch_nodes(s, ww, hh, provider),
+                    shot, w, h,
+                )
+                self._device._cache.set(("__frame_nodes__", hash(shot)), nodes)
+            locs = locator.filter(nodes)
+        else:
+            shot, locs = self._retry_ask(
+                lambda s, ww, hh: locator.resolve(s, ww, hh, provider),
+                shot, w, h,
+            )
 
         # cache under the frame that produced the result
         self._device._cache.set(
@@ -70,6 +93,30 @@ class Selector:
             picked_index=self._index,
         )
         return locs
+
+    def _retry_ask(self, fetch, shot, w, h):
+        """Run ``fetch(shot, w, h)`` under the flaky-frame retry loop.
+
+        Hard provider failures (bad key / unknown model / text-only model /
+        no balance) propagate immediately - retrying cannot fix them, and
+        masking them as "not found" makes failures undiagnosable. Only
+        transient problems (rate limit, connection blip, empty result)
+        consume retries with a fresh frame. Returns (final_shot, result).
+        """
+        cfg = self._device._config
+        result: list[Located] = []
+        for attempt in range(cfg.resolve_retries + 1):
+            try:
+                result = fetch(shot, w, h)
+            except _HARD_PROVIDER_ERRORS:
+                raise
+            except Exception:
+                result = []
+            if result:
+                break
+            if attempt < cfg.resolve_retries:
+                shot, (w, h) = self._device._screenshot(force=True)
+        return shot, result
 
     def _kind(self) -> str:
         if "image" in self._query:

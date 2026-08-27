@@ -72,5 +72,10 @@ class ProviderRateLimitError(ProviderError):
     """HTTP 429 — rate limited."""
 
 
+class OutputTruncatedError(ProviderError):
+    """Model output was cut off by the max_tokens limit, so the returned JSON
+    may be incomplete. Raise sampling.max_tokens and retry."""
+
+
 class ProviderConnectionError(ProviderError):
     """Cannot reach base_url (network / DNS / wrong endpoint)."""

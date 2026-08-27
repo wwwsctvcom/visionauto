@@ -25,7 +25,7 @@ import subprocess
 import pytest
 from PIL import Image, ImageDraw, ImageFont
 
-from visionauto.providers import get_provider_from_env
+from visionauto.providers import create_transport
 from visionauto.providers.prompts import (
     DESCRIPTION_PROMPT_TEMPLATE,
     IMAGE_PROMPT,
@@ -69,7 +69,12 @@ def _adb_screenshot() -> bytes:
 def _provider():
     if not os.environ.get("VISIONAUTO_API_KEY"):
         pytest.skip("set VISIONAUTO_API_KEY")
-    return get_provider_from_env()
+    return create_transport(
+        base_url=os.environ.get("VISIONAUTO_BASE_URL"),
+        api_key=os.environ["VISIONAUTO_API_KEY"],
+        model=os.environ.get("VISIONAUTO_MODEL"),
+        api_format=os.environ.get("VISIONAUTO_API_FORMAT") or "chat",
+    )
 
 
 def _draw(screenshot_png: bytes, nodes: list[dict], out_name: str) -> None:

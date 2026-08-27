@@ -1,7 +1,7 @@
 """visionauto: uiautomator2 device control with AI-vision selectors.
 
-One entry point — VisionDevice takes the device serial (sn) and the model
-connection. Simplest usage - just pass base_url + api_key + model::
+One entry point - VisionDevice takes the device serial (sn) and the model
+connection. The connection is three plain values users already know::
 
     from visionauto import VisionDevice
 
@@ -9,12 +9,12 @@ connection. Simplest usage - just pass base_url + api_key + model::
         sn="emulator-5554",                 # USB serial / WiFi adb "192.168.1.10:5555"
         base_url="https://api.deepseek.com/v1",
         api_key="sk-xxx",
-        model="deepseek-v4-flash-vision-exp",
+        model="deepseek-v4-flash-vision-exp",   # or a Model preset
     )
     d(text="你好").click()
 
-Or use a provider preset to skip remembering base_url:
-VisionDevice(sn, provider="qwen", api_key="sk-...").
+Optional sugar: api_format=ApiFormat.MESSAGES / RESPONSES (default CHAT) and
+sampling=Sampling(max_tokens=4096).
 """
 from __future__ import annotations
 
@@ -25,6 +25,7 @@ from .exceptions import (
     ImageNotSupportedError,
     InsufficientBalanceError,
     ModelNotFoundError,
+    OutputTruncatedError,
     ProviderAuthError,
     ProviderConfigError,
     ProviderConnectionError,
@@ -33,13 +34,17 @@ from .exceptions import (
     VisionAutoError,
 )
 from .located import Located
-from .providers.models import Models
+from .providers.types import ApiFormat, Model, Sampling
 from .selector import Selector
 
 __all__ = [
     "VisionDevice",
     "Config",
-    "Models",
+    # connection types
+    "ApiFormat",
+    "Model",
+    "Sampling",
+    # selector layer
     "Selector",
     "Located",
     # errors
@@ -53,4 +58,5 @@ __all__ = [
     "InsufficientBalanceError",
     "ProviderRateLimitError",
     "ProviderConnectionError",
+    "OutputTruncatedError",
 ]
